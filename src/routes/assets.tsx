@@ -1,0 +1,256 @@
+import { useMemo, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { LaptopMinimal, Plus, RotateCcw, Wrench } from "lucide-react";
+import { toast } from "sonner";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { PageHeader } from "@/components/common/PageHeader";
+import { StatCard } from "@/components/common/StatCard";
+import { SectionCard } from "@/components/common/SectionCard";
+import { DataTable, type Column } from "@/components/common/DataTable";
+import { FilterBar } from "@/components/common/FilterBar";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { Button } from "@/components/ui/button";
+import { assetService } from "@/services/assetService";
+import { useSession } from "@/hooks/useSession";
+import { requireAuthForPath } from "@/lib/auth-guard";
+import { inr, shortDate } from "@/lib/format";
+import type { Asset } from "@/types";
+
+export const Route = createFileRoute("/assets")({
+  beforeLoad: () => requireAuthForPath("/assets"),
+  head: () => ({
+    meta: [
+      { title: "Asset management · Kinetix" },
+      {
+        name: "description",
+        content:
+          "Track company assets by tag and serial, assign or return devices, and log repairs with a full history trail.",
+      },
+      { property: "og:title", content: "Asset management · Kinetix" },
+      {
+        property: "og:description",
+        content: "Assign, return and repair company devices with a complete audit trail.",
+      },
+    ],
+  }),
+  component: AssetsPage,
+});
+
+function AssetsPage() {
+  const { role, user } = useSession();
+  const isSelfService = role === "employee";
+  const canManage = role === "admin" || role === "hr";
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
+  const [category, setCategory] = useState("all");
+
+  const assets = useQuery({
+    queryKey: ["assets", isSelfService ? user.name : "all", search, status, category],
+    queryFn: () =>
+      isSelfService ? assetService.assignedTo(user.name) : assetService.list({ search, status, category }),
+  });
+  const history = useQuery({ queryKey: ["asset-history"], queryFn: () => assetService.history() });
+
+  const returnAsset = useMutation({
+    mutationFn: (tag: string) => assetService.markReturned(tag),
+    onSuccess: () => {
+      toast.success("Asset marked as returned");
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+    onError: (error) => toast.error("Could not update the asset", { description: error instanceof Error ? error.message : "Try again." }),
+  });
+
+  const repairAsset = useMutation({
+    mutationFn: (tag: string) => assetService.sendForRepair(tag, "Reported from asset console"),
+    onSuccess: () => {
+      toast.success("Repair request logged");
+      queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+    onError: (error) => toast.error("Could not log the repair request", { description: error instanceof Error ? error.message : "Try again." }),
+  });
+
+  const columns = useMemo<Column<Asset>[]>(
+    () => [
+      {
+        key: "asset",
+        header: "Asset",
+        cell: (row) => (
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{row.name}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {row.tag} · {row.serial}
+            </p>
+          </div>
+        ),
+      },
+      { key: "category", header: "Category", cell: (row) => <span className="text-sm">{row.category}</span> },
+      {
+        key: "assignedTo",
+        header: "Assigned to",
+        cell: (row) => <span className="text-sm">{row.assignedTo ?? "Unassigned"}</span>,
+      },
+      {
+        key: "assignedOn",
+        header: "Issued",
+        cell: (row) => <span className="text-sm">{shortDate(row.assignedOn)}</span>,
+      },
+      { key: "condition", header: "Condition", cell: (row) => <StatusBadge status={row.condition} /> },
+      { key: "value", header: "Value", align: "right", cell: (row) => <span className="text-sm">{inr(row.value)}</span> },
+      {
+        key: "warranty",
+        header: "Warranty till",
+        cell: (row) => <span className="text-sm">{shortDate(row.warrantyTill)}</span>,
+      },
+      { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+      {
+        key: "actions",
+        header: "Actions",
+        align: "right",
+        className: "pr-5",
+        cell: (row) => (
+          <div className="flex justify-end gap-1.5">
+            {canManage ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={returnAsset.isPending || row.status !== "assigned"}
+                onClick={() => returnAsset.mutate(row.tag)}
+              >
+                <RotateCcw className="size-3.5" /> Return
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={repairAsset.isPending}
+              onClick={() => repairAsset.mutate(row.tag)}
+            >
+              <Wrench className="size-3.5" /> Repair
+            </Button>
+          </div>
+        ),
+      },
+    ],
+    [canManage, repairAsset, returnAsset],
+  );
+
+  const rows = assets.data ?? [];
+
+  return (
+    <AppLayout>
+      <PageHeader
+        eyebrow="Workplace"
+        title={isSelfService ? "My assets" : "Asset management"}
+        description={
+          isSelfService
+            ? "Devices issued to you, their condition and how to report an issue."
+            : "Inventory, assignment and repair lifecycle for every company asset."
+        }
+        actions={
+          canManage ? (
+            <Button>
+              <Plus className="size-4" /> Add asset
+            </Button>
+          ) : null
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Total tracked" value={String(rows.length)} icon={LaptopMinimal} tone="primary" hint="in current view" />
+        <StatCard
+          label="Assigned"
+          value={String(rows.filter((a) => a.status === "assigned").length)}
+          icon={LaptopMinimal}
+          tone="info"
+          hint="with employees"
+        />
+        <StatCard
+          label="Available"
+          value={String(rows.filter((a) => a.status === "available").length)}
+          icon={LaptopMinimal}
+          tone="success"
+          hint="ready to issue"
+        />
+        <StatCard
+          label="In repair"
+          value={String(rows.filter((a) => a.status === "in-repair").length)}
+          icon={Wrench}
+          tone="warning"
+          hint="with vendor"
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        isLoading={assets.isLoading}
+        isError={assets.isError}
+        onRetry={() => assets.refetch()}
+        emptyTitle="No assets found"
+        emptyDescription="Add inventory or adjust the filters to see assets."
+        caption={`${rows.length} assets`}
+        toolbar={
+          isSelfService ? undefined : (
+            <FilterBar
+              search={search}
+              onSearchChange={setSearch}
+              placeholder="Search by name, tag, serial or holder…"
+              filters={[
+                {
+                  id: "status",
+                  label: "Status",
+                  value: status,
+                  onChange: setStatus,
+                  options: [
+                  { value: "all", label: "All status" },
+                    { value: "assigned", label: "Assigned" },
+                    { value: "available", label: "Available" },
+                    { value: "in-repair", label: "In repair" },
+                    { value: "retired", label: "Retired" },
+                    { value: "lost", label: "Lost" },
+                  ],
+                },
+                {
+                  id: "category",
+                  label: "Category",
+                  value: category,
+                  onChange: setCategory,
+                  options: [
+                    { value: "all", label: "All categories" },
+                    { value: "Laptop", label: "Laptop" },
+                    { value: "Desktop", label: "Desktop" },
+                    { value: "Monitor", label: "Monitor" },
+                    { value: "Mobile", label: "Mobile" },
+                    { value: "ID Card", label: "ID card" },
+                    { value: "Other", label: "Other" },
+                  ],
+                },
+              ]}
+            />
+          )
+        }
+      />
+
+      <SectionCard title="Asset history" description="Assignment, return and repair events" bodyClassName="p-0">
+        <ul className="divide-y divide-border">
+          {(history.data ?? []).slice(0, 8).map((event) => (
+            <li key={event.id} className="flex items-center gap-3 px-5 py-3.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">
+                  {event.assetTag} · {event.type}
+                </p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {event.actor} · {event.note}
+                </p>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">{shortDate(event.date)}</span>
+            </li>
+          ))}
+        </ul>
+      </SectionCard>
+    </AppLayout>
+  );
+}

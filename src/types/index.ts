@@ -1,0 +1,310 @@
+export type Role = "admin" | "hr" | "manager" | "employee";
+
+export interface SessionUser {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+  designation: string;
+  department: string;
+  avatarUrl?: string;
+}
+
+export type EmploymentStatus = "active" | "probation" | "notice" | "resigned" | "on-leave";
+export type EmploymentType = "full-time" | "part-time" | "contract" | "intern";
+
+export interface Employee {
+  id: string;
+  code: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  avatarUrl?: string;
+  department: string;
+  designation: string;
+  role: Role;
+  managerName: string | null;
+  location: string;
+  joinedOn: string;
+  status: EmploymentStatus;
+  employmentType: EmploymentType;
+  shift: string;
+  gender: string;
+  dateOfBirth: string;
+  bloodGroup: string;
+  maritalStatus: string;
+  address: string;
+  emergencyContact: { name: string; relation: string; phone: string };
+  bank: { accountName: string; accountNumber: string; ifsc: string; bankName: string };
+  ctcAnnual: number;
+  leaveBalance: { casual: number; sick: number; earned: number; unpaid: number };
+}
+
+export interface Department {
+  id: string;
+  name: string;
+  head: string;
+  headcount: number;
+  openRoles: number;
+  designations: string[];
+  costCenter: string;
+}
+
+export type AttendanceStatus =
+  | "present"
+  | "absent"
+  | "late"
+  | "half-day"
+  | "wfh"
+  | "leave"
+  | "holiday"
+  | "week-off";
+
+export interface AttendanceRecord {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  date: string;
+  checkIn: string | null;
+  checkOut: string | null;
+  workedHours: number;
+  overtimeHours: number;
+  status: AttendanceStatus;
+  shift: string;
+  source: "web" | "mobile" | "biometric" | "manual";
+  note?: string;
+}
+
+export interface AttendanceCorrection {
+  id: string;
+  employeeName: string;
+  date: string;
+  requested: string;
+  reason: string;
+  status: RequestStatus;
+}
+
+export interface Shift {
+  id: string;
+  name: string;
+  start: string;
+  end: string;
+  breakMinutes: number;
+  graceMinutes: number;
+  weekOffs: string[];
+  assigned: number;
+  isNightShift: boolean;
+}
+
+export type RequestStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface LeaveRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  type: "Casual" | "Sick" | "Earned" | "Unpaid" | "Maternity" | "Comp-off";
+  from: string;
+  to: string;
+  days: number;
+  reason: string;
+  status: RequestStatus;
+  appliedOn: string;
+  approver: string;
+}
+
+export interface PayrollRun {
+  id: string;
+  period: string;
+  employees: number;
+  gross: number;
+  deductions: number;
+  net: number;
+  status: "draft" | "processing" | "paid" | "on-hold";
+  payDate: string;
+}
+
+export interface Payslip {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  period: string;
+  basic: number;
+  hra: number;
+  allowances: number;
+  bonus: number;
+  pf: number;
+  tax: number;
+  otherDeductions: number;
+  net: number;
+  status: "paid" | "pending";
+}
+
+export type AssetCategory =
+  | "Laptop"
+  | "Desktop"
+  | "Monitor"
+  | "Mobile"
+  | "Keyboard"
+  | "Mouse"
+  | "ID Card"
+  | "Other";
+
+export type AssetStatus = "assigned" | "available" | "in-repair" | "retired" | "lost";
+export type AssetCondition = "new" | "good" | "fair" | "damaged";
+
+export interface Asset {
+  id: string;
+  tag: string;
+  name: string;
+  category: AssetCategory;
+  serial: string;
+  status: AssetStatus;
+  condition: AssetCondition;
+  assignedTo: string | null;
+  assignedOn: string | null;
+  purchaseDate: string;
+  value: number;
+  warrantyTill: string;
+  location: string;
+}
+
+export interface AssetEvent {
+  id: string;
+  assetTag: string;
+  type: "assigned" | "returned" | "repair" | "replaced" | "audit";
+  actor: string;
+  date: string;
+  note: string;
+}
+
+export interface JobOpening {
+  id: string;
+  title: string;
+  department: string;
+  location: string;
+  type: EmploymentType;
+  openings: number;
+  applicants: number;
+  stage: "draft" | "open" | "on-hold" | "closed";
+  postedOn: string;
+  hiringManager: string;
+}
+
+export interface Candidate {
+  id: string;
+  name: string;
+  role: string;
+  stage: "applied" | "screening" | "interview" | "offer" | "hired" | "rejected";
+  experience: string;
+  source: string;
+  rating: number;
+  appliedOn: string;
+}
+
+export interface OnboardingJourney {
+  id: string;
+  employeeName: string;
+  designation: string;
+  startDate: string;
+  buddy: string;
+  progress: number;
+  tasks: { label: string; owner: string; done: boolean }[];
+}
+
+export interface Goal {
+  id: string;
+  employeeName: string;
+  title: string;
+  category: "Business" | "Learning" | "Team" | "Quality";
+  progress: number;
+  weight: number;
+  dueDate: string;
+  status: "on-track" | "at-risk" | "delayed" | "completed";
+}
+
+export interface PerformanceReview {
+  id: string;
+  employeeName: string;
+  cycle: string;
+  reviewer: string;
+  selfScore: number;
+  managerScore: number;
+  finalRating: number;
+  status: "not-started" | "in-progress" | "submitted" | "closed";
+}
+
+export interface DocumentItem {
+  id: string;
+  name: string;
+  category: "Identity" | "Education" | "Contract" | "Policy" | "Payroll" | "Other";
+  owner: string;
+  size: string;
+  uploadedOn: string;
+  expiresOn: string | null;
+  verified: boolean;
+}
+
+export interface ExpenseClaim {
+  id: string;
+  employeeName: string;
+  category: "Travel" | "Food" | "Internet" | "Equipment" | "Client" | "Other";
+  amount: number;
+  date: string;
+  status: RequestStatus | "reimbursed";
+  note: string;
+}
+
+export interface HelpdeskTicket {
+  id: string;
+  subject: string;
+  category: "Payroll" | "IT" | "Attendance" | "Policy" | "Facilities" | "Other";
+  raisedBy: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  status: "open" | "in-progress" | "resolved" | "closed";
+  createdOn: string;
+  assignee: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  audience: "All" | "Engineering" | "Sales" | "Managers";
+  author: string;
+  publishedOn: string;
+  pinned: boolean;
+}
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  description: string;
+  type: "leave" | "payroll" | "asset" | "attendance" | "system";
+  createdAt: string;
+  read: boolean;
+}
+
+export interface AuditEntry {
+  id: string;
+  actor: string;
+  action: string;
+  entity: string;
+  ip: string;
+  timestamp: string;
+  severity: "info" | "warning" | "critical";
+}
+
+export interface TrendPoint {
+  label: string;
+  present: number;
+  absent: number;
+  wfh: number;
+}
+
+export interface HeadcountPoint {
+  label: string;
+  joined: number;
+  exited: number;
+  headcount: number;
+}
