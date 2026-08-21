@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BadgeIndianRupee, Download, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -21,13 +21,13 @@ export const Route = createFileRoute("/payroll")({
   beforeLoad: () => requireAuthForPath("/payroll"),
   head: () => ({
     meta: [
-      { title: "Payroll & payslips · Kinetix" },
+      { title: "Payroll & payslips · TeamNest" },
       {
         name: "description",
         content:
           "Monthly payroll runs with gross, deductions and net payouts, plus downloadable payslip breakdowns.",
       },
-      { property: "og:title", content: "Payroll · Kinetix" },
+      { property: "og:title", content: "Payroll · TeamNest" },
       {
         property: "og:description",
         content: "Run payroll, review deductions and share payslips with employees.",
@@ -38,6 +38,8 @@ export const Route = createFileRoute("/payroll")({
 });
 
 function PayrollPage() {
+  const queryClient = useQueryClient();
+  const startRun = useMutation({ mutationFn: () => { const now = new Date(); return payrollService.startRun({ year: now.getFullYear(), month: now.getMonth() + 1 }); }, onSuccess: () => { toast.success("Payroll run created"); void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); }, onError: (e) => toast.error("Could not start payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
   const { role, user } = useSession();
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
@@ -48,7 +50,7 @@ function PayrollPage() {
     queryKey: ["payslips", isSelfService ? user.id : "all", search, status],
     queryFn: () =>
       payrollService.payslips({
-        ...(isSelfService ? { employeeId: user.id } : {}),
+        ...(isSelfService ? { employeeId: user.employeeId ?? user.id } : {}),
         search,
         status,
       }),
@@ -128,8 +130,8 @@ function PayrollPage() {
         }
         actions={
           isSelfService ? null : (
-            <Button>
-              <Wallet className="size-4" /> Start payroll run
+            <Button onClick={() => startRun.mutate()} disabled={startRun.isPending}>
+              <Wallet className="size-4" /> {startRun.isPending ? "Starting…" : "Start payroll run"}
             </Button>
           )
         }

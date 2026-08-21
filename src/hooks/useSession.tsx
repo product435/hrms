@@ -22,7 +22,7 @@ interface SessionContextValue {
 const SessionContext = createContext<SessionContextValue>({
   user: {
     id: "",
-    name: "Kinetix user",
+    name: "TeamNest user",
     email: "",
     role: "employee",
     designation: "",
@@ -66,7 +66,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => ({
       user: session?.user ?? {
         id: "",
-        name: "Kinetix user",
+        name: "TeamNest user",
         email: "",
         role: "employee",
         designation: "",

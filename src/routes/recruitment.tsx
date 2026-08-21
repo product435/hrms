@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Briefcase, Plus, Star, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuthForPath } from "@/lib/auth-guard";
@@ -14,18 +14,23 @@ import { Button } from "@/components/ui/button";
 import { talentService } from "@/services/talentService";
 import { shortDate } from "@/lib/format";
 import type { Candidate } from "@/types";
+import { employeeService } from "@/services/employeeService";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/recruitment")({
   beforeLoad: () => requireAuthForPath("/recruitment"),
   head: () => ({
     meta: [
-      { title: "Recruitment pipeline · Kinetix" },
+      { title: "Recruitment pipeline · TeamNest" },
       {
         name: "description",
         content:
           "Open requisitions, applicant volume and a stage-by-stage candidate pipeline from applied to hired.",
       },
-      { property: "og:title", content: "Recruitment · Kinetix" },
+      { property: "og:title", content: "Recruitment · TeamNest" },
       {
         property: "og:description",
         content: "Track requisitions and move candidates through screening, interview and offer.",
@@ -40,12 +45,15 @@ const STAGES: Candidate["stage"][] = ["applied", "screening", "interview", "offe
 function RecruitmentPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
+  const [open, setOpen] = useState(false); const [form, setForm] = useState({ title: "", departmentId: "", location: "", openings: "1" }); const queryClient = useQueryClient();
+  const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
 
   const openings = useQuery({ queryKey: ["openings"], queryFn: () => talentService.openings() });
   const candidates = useQuery({
     queryKey: ["candidates", search, stage],
     queryFn: () => talentService.candidates({ search, status: stage }),
   });
+  const create = useMutation({ mutationFn: () => { if (!form.title.trim()) throw new Error("Title is required."); const input = { title: form.title, location: form.location, openings: Math.max(1, Number(form.openings) || 1), employmentType: "full-time" }; return talentService.createOpening(form.departmentId ? { ...input, departmentId: form.departmentId } : input); }, onSuccess: () => { toast.success("Requisition created"); setOpen(false); setForm({ title: "", departmentId: "", location: "", openings: "1" }); void queryClient.invalidateQueries({ queryKey: ["openings"] }); }, onError: (e) => toast.error("Could not create requisition", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
 
   const rows = candidates.data ?? [];
 
@@ -56,7 +64,7 @@ function RecruitmentPage() {
         title="Recruitment pipeline"
         description="Requisitions, applicant flow and interview progress across every open role."
         actions={
-          <Button>
+          <Button onClick={() => setOpen(true)}>
             <Plus className="size-4" /> New requisition
           </Button>
         }
@@ -118,6 +126,7 @@ function RecruitmentPage() {
           </ul>
         )}
       </SectionCard>
+      <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>New requisition</DialogTitle></DialogHeader><div className="grid gap-3"><div><Label>Title</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div><div><Label>Department</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}><option value="">Unassigned</option>{(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><div><Label>Location</Label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></div><div><Label>Openings</Label><Input type="number" min="1" value={form.openings} onChange={(e) => setForm({ ...form, openings: e.target.value })} /></div></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => create.mutate()} disabled={create.isPending}>{create.isPending ? "Saving…" : "Create requisition"}</Button></DialogFooter></DialogContent></Dialog>
 
       <SectionCard title="Candidate pipeline" description="Drag-free kanban view by stage" bodyClassName="space-y-4 p-5">
         <FilterBar

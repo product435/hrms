@@ -15,7 +15,7 @@ import type { AuditEntry } from "@/types";
 export const Route = createFileRoute("/audit")({
   beforeLoad: () => requireAuthForPath("/audit"),
   head: () => ({
-    meta: [{ title: "Activity history · Kinetix" }],
+    meta: [{ title: "Activity history · TeamNest" }],
   }),
   component: AuditPage,
 });

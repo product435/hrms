@@ -13,13 +13,13 @@ export const Route = createFileRoute("/shifts")({
   beforeLoad: () => requireAuthForPath("/shifts"),
   head: () => ({
     meta: [
-      { title: "Shifts & rosters · Kinetix" },
+      { title: "Shifts & rosters · TeamNest" },
       {
         name: "description",
         content:
           "Shift definitions with timings, grace period, break minutes, week-offs and assigned headcount.",
       },
-      { property: "og:title", content: "Shifts & rosters · Kinetix" },
+      { property: "og:title", content: "Shifts & rosters · TeamNest" },
       {
         property: "og:description",
         content: "Define shift timings, grace windows and week-offs, and see who is assigned.",

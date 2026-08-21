@@ -13,7 +13,7 @@ import { isStrongPassword, passwordChecks } from "@/lib/password";
 export const Route = createFileRoute("/sign-up")({
   beforeLoad: () => redirectIfAuthenticated(),
   head: () => ({
-    meta: [{ title: "Create account · Kinetix" }],
+    meta: [{ title: "Create account · TeamNest" }],
   }),
   component: SignUpPage,
 });
@@ -65,7 +65,7 @@ function SignUpPage() {
   return (
     <AuthLayout
       title="Create account"
-      subtitle="Join Kinetix through your organisation invite. Your role is assigned by HR after verification."
+      subtitle="Join TeamNest through your organisation invite. Your role is assigned by HR after verification."
       footer={
         <Link to="/sign-in" className="font-medium text-primary hover:underline">
           Sign in

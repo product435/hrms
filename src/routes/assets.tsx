@@ -16,18 +16,21 @@ import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { inr, shortDate } from "@/lib/format";
 import type { Asset } from "@/types";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/assets")({
   beforeLoad: () => requireAuthForPath("/assets"),
   head: () => ({
     meta: [
-      { title: "Asset management · Kinetix" },
+      { title: "Asset management · TeamNest" },
       {
         name: "description",
         content:
           "Track company assets by tag and serial, assign or return devices, and log repairs with a full history trail.",
       },
-      { property: "og:title", content: "Asset management · Kinetix" },
+      { property: "og:title", content: "Asset management · TeamNest" },
       {
         property: "og:description",
         content: "Assign, return and repair company devices with a complete audit trail.",
@@ -38,18 +41,22 @@ export const Route = createFileRoute("/assets")({
 });
 
 function AssetsPage() {
-  const { role, user } = useSession();
+  const { role, user, isLoading } = useSession();
   const isSelfService = role === "employee";
   const canManage = role === "admin" || role === "hr";
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
+  const [addOpen, setAddOpen] = useState(false); const [form, setForm] = useState({ code: "", name: "", category: "Laptop", condition: "new", status: "available", serialNumber: "", location: "", purchaseCost: "" });
 
   const assets = useQuery({
     queryKey: ["assets", isSelfService ? user.name : "all", search, status, category],
     queryFn: () =>
-      isSelfService ? assetService.assignedTo(user.name) : assetService.list({ search, status, category }),
+      isSelfService
+        ? assetService.assignedTo(user.employeeId ?? user.id)
+        : assetService.list({ search, status, category }),
+    enabled: !isLoading,
   });
   const history = useQuery({ queryKey: ["asset-history"], queryFn: () => assetService.history() });
 
@@ -70,6 +77,7 @@ function AssetsPage() {
     },
     onError: (error) => toast.error("Could not log the repair request", { description: error instanceof Error ? error.message : "Try again." }),
   });
+  const addAsset = useMutation({ mutationFn: () => { if (!form.code.trim() || !form.name.trim()) throw new Error("Asset code and name are required."); return assetService.create({ ...form, purchaseCost: Number(form.purchaseCost) || 0 }); }, onSuccess: () => { toast.success("Asset added"); setAddOpen(false); setForm({ code: "", name: "", category: "Laptop", condition: "new", status: "available", serialNumber: "", location: "", purchaseCost: "" }); void queryClient.invalidateQueries({ queryKey: ["assets"] }); }, onError: (e) => toast.error("Could not add asset", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
 
   const columns = useMemo<Column<Asset>[]>(
     () => [
@@ -150,7 +158,7 @@ function AssetsPage() {
         }
         actions={
           canManage ? (
-            <Button>
+            <Button onClick={() => setAddOpen(true)}>
               <Plus className="size-4" /> Add asset
             </Button>
           ) : null
@@ -251,6 +259,7 @@ function AssetsPage() {
           ))}
         </ul>
       </SectionCard>
+      <Dialog open={addOpen} onOpenChange={setAddOpen}><DialogContent><DialogHeader><DialogTitle>Add asset</DialogTitle></DialogHeader><div className="grid gap-3 sm:grid-cols-2">{([['code','Asset code'],['name','Name'],['serialNumber','Serial number'],['location','Location'],['purchaseCost','Purchase cost']] as const).map(([key,label]) => <div key={key}><Label>{label}</Label><Input type={key === 'purchaseCost' ? 'number' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}<div><Label>Category</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Laptop</option><option>Desktop</option><option>Monitor</option><option>Mobile</option><option>ID Card</option><option>Other</option></select></div></div><DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={() => addAsset.mutate()} disabled={addAsset.isPending}>{addAsset.isPending ? "Saving…" : "Add asset"}</Button></DialogFooter></DialogContent></Dialog>
     </AppLayout>
   );
 }

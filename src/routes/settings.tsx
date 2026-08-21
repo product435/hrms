@@ -14,7 +14,7 @@ import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 export const Route = createFileRoute("/settings")({
   beforeLoad: () => requireAuthForPath("/settings"),
   head: () => ({
-    meta: [{ title: "Settings · Kinetix" }],
+    meta: [{ title: "Settings · TeamNest" }],
   }),
   component: SettingsPage,
 });
@@ -40,13 +40,13 @@ function SettingsPage() {
         <TabsContent value="organisation">
           <SectionCard
             title="Company profile"
-            description="Branding and regional defaults shown across Kinetix."
+                description="Branding and regional defaults shown across TeamNest."
             bodyClassName="space-y-4 p-5"
           >
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="company">Company name</Label>
-                <Input id="company" defaultValue="Kinetix Technologies" />
+                <Input id="company" defaultValue="Jeevijay Technologies" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="timezone">Primary timezone</Label>

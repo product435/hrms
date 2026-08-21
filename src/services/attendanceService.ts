@@ -21,7 +21,7 @@ function mapAttendance(row: any): AttendanceRecord {
     status: row.status,
     shift: row.shifts?.name ?? "",
     source: row.source,
-    note: row.note ?? undefined,
+    note: row.remarks ?? undefined,
   };
 }
 function mapShift(row: any): Shift {
@@ -32,9 +32,9 @@ function mapShift(row: any): Shift {
     end: row.end_time,
     breakMinutes: row.break_minutes,
     graceMinutes: row.grace_minutes,
-    weekOffs: row.week_offs ?? [],
+    weekOffs: [],
     assigned: 0,
-    isNightShift: row.is_night_shift,
+    isNightShift: row.is_overnight,
   };
 }
 
@@ -51,7 +51,7 @@ export const attendanceService = {
       );
     let query = supabase
       .from("attendance_records")
-      .select("*")
+      .select("*, employees(first_name,last_name), shifts(name)")
       .order("attendance_date", { ascending: false });
     if (options.employeeId) query = query.eq("employee_id", options.employeeId);
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
@@ -67,7 +67,7 @@ export const attendanceService = {
     const resolved = await requireEmployeeId(employeeId);
     const { data, error } = await supabase
       .from("attendance_records")
-      .select("*")
+      .select("*, employees(first_name,last_name), shifts(name)")
       .eq("employee_id", resolved)
       .eq("attendance_date", new Date().toISOString().slice(0, 10))
       .maybeSingle();
@@ -89,17 +89,16 @@ export const attendanceService = {
       return fromFixture({ employeeId, source, at: new Date().toISOString() });
     const resolved = await requireEmployeeId(employeeId);
     const date = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("attendance_records")
-      .upsert(
-        {
-          employee_id: resolved,
-          attendance_date: date,
-          [field]: new Date().toISOString(),
-          source,
-          status: "present",
-        },
-      )
+      .upsert({
+        employee_id: resolved,
+        attendance_date: date,
+        source,
+        status: "present",
+        ...(field === "check_in" ? { check_in: now } : { check_out: now }),
+      })
       .select()
       .single();
     if (error) throw error;
@@ -109,14 +108,13 @@ export const attendanceService = {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureCorrections);
     const { data, error } = await supabase
       .from("attendance_corrections")
-      .select("*")
-      ;
+      .select("*, employees(first_name,last_name), attendance_records(attendance_date)");
     if (error) throw error;
     return (data ?? []).map((r: any) => ({
       id: r.id,
       employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
-      date: r.attendance_date,
-      requested: r.requested,
+      date: r.attendance_records?.attendance_date ?? "",
+      requested: [r.requested_check_in, r.requested_check_out].filter(Boolean).join(" – "),
       reason: r.reason,
       status: r.status,
     }));

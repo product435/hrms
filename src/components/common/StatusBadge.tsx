@@ -69,11 +69,12 @@ export function StatusBadge({
   tone,
   className,
 }: {
-  status: string;
+  status: string | null | undefined;
   tone?: Tone;
   className?: string;
 }) {
-  const resolved = tone ?? TONE_BY_STATUS[status.toLowerCase()] ?? "neutral";
+  const value = status ?? "";
+  const resolved = tone ?? TONE_BY_STATUS[value.toLowerCase()] ?? "neutral";
   return (
     <span
       className={cn(
@@ -83,7 +84,7 @@ export function StatusBadge({
       )}
     >
       <span className="size-1.5 rounded-full bg-current" />
-      {humanize(status)}
+      {value ? humanize(value) : "—"}
     </span>
   );
 }

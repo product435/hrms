@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, UserPlus } from "lucide-react";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -12,18 +13,21 @@ import { Button } from "@/components/ui/button";
 import { employeeService } from "@/services/employeeService";
 import { initialsOf, shortDate } from "@/lib/format";
 import type { Employee } from "@/types";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/employees/")({
   beforeLoad: () => requireAuthForPath("/employees"),
   head: () => ({
     meta: [
-      { title: "Employee directory · Kinetix" },
+      { title: "Employee directory · TeamNest" },
       {
         name: "description",
         content:
           "Search the employee directory by department and status, and open any profile for full employment details.",
       },
-      { property: "og:title", content: "Employee directory · Kinetix" },
+      { property: "og:title", content: "Employee directory · TeamNest" },
       {
         property: "og:description",
         content: "Every employee record, department and reporting line in one searchable directory.",
@@ -38,12 +42,29 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [status, setStatus] = useState("all");
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" });
+  const queryClient = useQueryClient();
 
   const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
   const employees = useQuery({
     queryKey: ["employees", search, department, status],
     queryFn: () => employeeService.list({ search, department, status }),
   });
+  const addEmployee = useMutation({
+    mutationFn: () => {
+      if (!form.firstName || !form.lastName || !form.email || !form.employeeCode || !form.joiningDate) throw new Error("First name, last name, email, employee code and joining date are required.");
+      return employeeService.create(form);
+    },
+    onSuccess: () => { toast.success("Employee added"); setAddOpen(false); setForm({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" }); void queryClient.invalidateQueries({ queryKey: ["employees"] }); },
+    onError: (e) => toast.error("Could not add employee", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
+  const exportEmployees = () => {
+    const rows = employees.data ?? [];
+    const csv = [["Employee code", "First name", "Last name", "Email", "Department", "Designation", "Status"], ...rows.map((e) => [e.code, e.firstName, e.lastName, e.email, e.department, e.designation, e.status])]
+      .map((row) => row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); const a = document.createElement("a"); a.href = url; a.download = "teamnest-employees.csv"; a.click(); URL.revokeObjectURL(url);
+  };
 
   const columns = useMemo<Column<Employee>[]>(
     () => [
@@ -95,10 +116,10 @@ function EmployeesPage() {
         description="Browse every employee record, filter by department or status, and open a profile for full details."
         actions={
           <>
-            <Button variant="outline">
+            <Button variant="outline" onClick={exportEmployees} disabled={employees.isLoading || !employees.data?.length}>
               <Download className="size-4" /> Export
             </Button>
-            <Button>
+            <Button onClick={() => setAddOpen(true)}>
               <UserPlus className="size-4" /> Add employee
             </Button>
           </>
@@ -150,6 +171,15 @@ function EmployeesPage() {
           />
         }
       />
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent><DialogHeader><DialogTitle>Add employee</DialogTitle></DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {([['firstName','First name'],['lastName','Last name'],['email','Email'],['employeeCode','Employee code'],['joiningDate','Joining date']] as const).map(([key,label]) => <div key={key} className="space-y-1"><Label>{label}</Label><Input type={key === 'joiningDate' ? 'date' : key === 'email' ? 'email' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}
+            <div className="space-y-1"><Label>Department</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}><option value="">Unassigned</option>{(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={() => addEmployee.mutate()} disabled={addEmployee.isPending}>{addEmployee.isPending ? "Saving…" : "Save employee"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

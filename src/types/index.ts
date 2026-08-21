@@ -2,6 +2,8 @@ export type Role = "admin" | "hr" | "manager" | "employee";
 
 export interface SessionUser {
   id: string;
+  /** The linked `employees.id` row, when this account has one (profiles.id is a different id space). */
+  employeeId?: string;
   name: string;
   email: string;
   role: Role;

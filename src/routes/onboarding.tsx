@@ -15,13 +15,13 @@ export const Route = createFileRoute("/onboarding")({
   beforeLoad: () => requireAuthForPath("/onboarding"),
   head: () => ({
     meta: [
-      { title: "Onboarding journeys · Kinetix" },
+      { title: "Onboarding journeys · TeamNest" },
       {
         name: "description",
         content:
           "Track new-hire onboarding checklists, task owners, buddy assignment and completion progress.",
       },
-      { property: "og:title", content: "Onboarding · Kinetix" },
+      { property: "og:title", content: "Onboarding · TeamNest" },
       {
         property: "og:description",
         content: "New-hire checklists with owners, buddies and live completion tracking.",

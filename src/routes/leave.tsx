@@ -39,13 +39,13 @@ export const Route = createFileRoute("/leave")({
   beforeLoad: () => requireAuthForPath("/leave"),
   head: () => ({
     meta: [
-      { title: "Leave management · Kinetix" },
+      { title: "Leave management · TeamNest" },
       {
         name: "description",
         content:
           "Apply for leave, track balances and approve or reject requests with a full audit of every decision.",
       },
-      { property: "og:title", content: "Leave management · Kinetix" },
+      { property: "og:title", content: "Leave management · TeamNest" },
       {
         property: "og:description",
         content: "Leave balances, applications and multi-level approvals in one workflow.",
@@ -68,14 +68,14 @@ function LeavePage() {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ type: "Casual", from: "", to: "", reason: "" });
 
-  const scope = isSelfService ? { employeeId: user.id } : {};
+  const scope = isSelfService ? { employeeId: user.employeeId ?? user.id } : {};
   const requests = useQuery({
     queryKey: ["leave", scope, search, status],
     queryFn: () => leaveService.list({ ...scope, search, status }),
   });
   const balance = useQuery({
     queryKey: ["leave-balance", user.id],
-    queryFn: () => leaveService.balance(user.id),
+    queryFn: () => leaveService.balance(user.employeeId ?? user.id),
   });
 
   const apply = useMutation({

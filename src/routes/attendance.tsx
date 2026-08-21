@@ -22,13 +22,13 @@ export const Route = createFileRoute("/attendance")({
   beforeLoad: () => requireAuthForPath("/attendance"),
   head: () => ({
     meta: [
-      { title: "Attendance & time tracking · Kinetix" },
+      { title: "Attendance & time tracking · TeamNest" },
       {
         name: "description",
         content:
           "Daily attendance log with check-in and check-out times, worked hours, overtime, WFH and correction requests.",
       },
-      { property: "og:title", content: "Attendance · Kinetix" },
+      { property: "og:title", content: "Attendance · TeamNest" },
       {
         property: "og:description",
         content: "Track check-ins, worked hours, overtime and attendance corrections.",
@@ -45,7 +45,7 @@ function AttendancePage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
 
-  const scope = isSelfService ? { employeeId: user.id } : {};
+  const scope = isSelfService ? { employeeId: user.employeeId ?? user.id } : {};
   const records = useQuery({
     queryKey: ["attendance", scope, search, status],
     queryFn: () => attendanceService.list({ ...scope, search, status }),
@@ -54,7 +54,7 @@ function AttendancePage() {
   const corrections = useQuery({ queryKey: ["corrections"], queryFn: () => attendanceService.corrections() });
   const today = useQuery({
     queryKey: ["attendance-today", user.id],
-    queryFn: () => attendanceService.today(user.id),
+    queryFn: () => attendanceService.today(user.employeeId ?? user.id),
   });
 
   const punch = useMutation({

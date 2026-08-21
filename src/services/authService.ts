@@ -1,4 +1,4 @@
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { isSupabaseConfigured, supabase, type SupabaseClientLike } from "@/lib/supabase";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { Role, SessionUser } from "@/types";
 
@@ -28,6 +28,7 @@ type ProfileRow = {
 };
 type RoleRow = { name?: string | null };
 type EmployeeRow = {
+  id?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
@@ -55,14 +56,17 @@ function roleFromValue(value: unknown): Role | null {
     : null;
 }
 
-async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | null> {
+export async function sessionForUser(
+  client: SupabaseClientLike,
+  user: SupabaseUser | null,
+): Promise<AuthSession | null> {
   if (!user) return null;
   const metadata = { ...user.app_metadata, ...user.user_metadata } as Record<string, unknown>;
   let profile: ProfileRow | null = null;
   let roleRecord: RoleRow | null = null;
   let employee: EmployeeRow | null = null;
-  if (supabase) {
-    const primary = await supabase
+  if (client) {
+    const primary = await client
       .from("profiles")
       .select("id, role, employee_id, full_name, email, avatar_url")
       .eq("id", user.id)
@@ -71,7 +75,7 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
     let profileError = primary.error;
     if (profileError) {
       // Keep compatibility with the newer role_id-based schema without requiring it.
-      const fallback = await supabase
+      const fallback = await client
         .from("profiles")
         .select("id, role_id, full_name, email, designation, department, avatar_url")
         .eq("id", user.id)
@@ -83,7 +87,7 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
     profile = profileData as ProfileRow | null;
 
     if (profile?.role_id) {
-      const { data: role, error: roleError } = await supabase
+      const { data: role, error: roleError } = await client
         .from("roles")
         .select("name")
         .eq("id", profile.role_id)
@@ -93,9 +97,9 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
     }
 
     if (profile && user.email) {
-      const { data: employeeRow } = await supabase
+      const { data: employeeRow } = await client
         .from("employees")
-        .select("first_name, last_name, email")
+        .select("id, first_name, last_name, email")
         .or(`profile_id.eq.${user.id},email.eq.${user.email}`)
         .maybeSingle();
       employee = employeeRow as EmployeeRow | null;
@@ -118,8 +122,9 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
       : undefined) ||
     profile.full_name ||
     user.email?.split("@")[0] ||
-    "Kinetix user";
+    "TeamNest user";
   const avatarUrl = profile.avatar_url ?? employee?.avatar_url;
+  const employeeId = profile.employee_id ?? employee?.id ?? undefined;
   return {
     user: {
       id: user.id,
@@ -129,6 +134,7 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
       designation: profile?.designation ?? "",
       department: profile?.department ?? "",
       ...(avatarUrl ? { avatarUrl } : {}),
+      ...(employeeId ? { employeeId } : {}),
     },
   };
 }
@@ -136,7 +142,7 @@ async function sessionForUser(user: SupabaseUser | null): Promise<AuthSession | 
 function ensureSupabaseListener() {
   if (!supabase || supabaseSubscription) return;
   supabaseSubscription = supabase.auth.onAuthStateChange((_event, session) => {
-    void sessionForUser(session?.user ?? null)
+    void sessionForUser(supabase, session?.user ?? null)
       .then(writeSession)
       .catch(() => writeSession(null));
   }).data.subscription;
@@ -152,7 +158,7 @@ async function initializeSession() {
   if (error) throw error;
   let session: AuthSession | null = null;
   try {
-    session = await sessionForUser(data.session?.user ?? null);
+    session = await sessionForUser(supabase, data.session?.user ?? null);
   } catch {
     session = null;
   }
@@ -227,7 +233,7 @@ export const authService = {
       return { error: { message } };
     }
     try {
-      writeSession(await sessionForUser(data.user));
+      writeSession(await sessionForUser(supabase, data.user));
     } catch (sessionError) {
       await supabase.auth.signOut();
       return {
@@ -258,7 +264,7 @@ export const authService = {
     if (error) return { error: { message: error.message } };
     if (data.session && data.user) {
       try {
-        writeSession(await sessionForUser(data.user));
+        writeSession(await sessionForUser(supabase, data.user));
       } catch (sessionError) {
         writeSession(null);
         return {

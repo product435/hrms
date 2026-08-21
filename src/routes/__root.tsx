@@ -80,14 +80,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Kinetix HRMS" },
+      { title: "TeamNest" },
       {
         name: "description",
         content:
-          "Kinetix is an enterprise HRMS for people operations: attendance, leave, payroll, assets, hiring and performance.",
+          "TeamNest is an enterprise HRMS for people operations: attendance, leave, payroll, assets, hiring and performance.",
       },
-      { name: "author", content: "Kinetix" },
-      { property: "og:title", content: "Kinetix HRMS" },
+      { name: "author", content: "Jeevijay Technologies" },
+      { property: "og:title", content: "TeamNest" },
       {
         property: "og:description",
         content: "Enterprise HR management for attendance, leave, payroll, assets and performance.",

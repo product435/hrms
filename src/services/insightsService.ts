@@ -55,41 +55,50 @@ export const insightsService = {
       { data: att },
       { data: leaves },
       { data: jobs },
-      { data: runs },
+      { data: latestRun },
       { data: assets },
       { data: tickets },
     ] = await Promise.all([
       supabase
         .from("employees")
         .select("id", { count: "exact", head: true })
-        .neq("status", "resigned"),
-      supabase.from("attendance").select("status").eq("attendance_date", today),
-      supabase.from("leave").select("status,from_date,to_date"),
-      supabase.from("jobs").select("id").eq("stage", "open"),
+        .neq("employment_status", "resigned"),
+      supabase.from("attendance_records").select("status").eq("attendance_date", today),
+      supabase.from("leave_requests").select("status,start_date,end_date"),
+      supabase.from("job_openings").select("id").eq("status", "open"),
       supabase
         .from("payroll_runs")
-        .select("net,status")
-        .order("period", { ascending: false })
-        .limit(1),
+        .select("id,status,year,month")
+        .order("year", { ascending: false })
+        .order("month", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
       supabase.from("assets").select("status"),
-      supabase.from("helpdesk_requests").select("status"),
+      supabase.from("helpdesk_tickets").select("status"),
     ]);
+    const payrollNet = latestRun
+      ? await supabase
+          .from("payroll_records")
+          .select("net_salary")
+          .eq("payroll_run_id", latestRun.id)
+          .then(({ data }) => (data ?? []).reduce((sum, r) => sum + Number(r.net_salary ?? 0), 0))
+      : 0;
     return {
       headcount: headcount ?? 0,
-      presentToday: (att ?? []).filter((r: any) => r.status === "present").length,
+      presentToday: (att ?? []).filter((r) => r.status === "present").length,
       onLeaveToday: (leaves ?? []).filter(
-        (r: any) => r.status === "approved" && r.from_date <= today && r.to_date >= today,
+        (r) => r.status === "approved" && (r.start_date ?? "") <= today && (r.end_date ?? "") >= today,
       ).length,
-      wfhToday: (att ?? []).filter((r: any) => r.status === "wfh").length,
-      lateToday: (att ?? []).filter((r: any) => r.status === "late").length,
+      wfhToday: (att ?? []).filter((r) => r.status === "wfh").length,
+      lateToday: (att ?? []).filter((r) => r.status === "late").length,
       attritionRate: 0,
       openPositions: (jobs ?? []).length,
-      pendingApprovals: (leaves ?? []).filter((r: any) => r.status === "pending").length,
-      payrollNet: Number(runs?.[0]?.net ?? 0),
-      payrollStatus: runs?.[0]?.status ?? "draft",
-      assetsAssigned: (assets ?? []).filter((r: any) => r.status === "assigned").length,
-      assetsInRepair: (assets ?? []).filter((r: any) => r.status === "in-repair").length,
-      openTickets: (tickets ?? []).filter((r: any) => !["closed", "resolved"].includes(r.status))
+      pendingApprovals: (leaves ?? []).filter((r) => r.status === "pending").length,
+      payrollNet,
+      payrollStatus: latestRun?.status ?? "draft",
+      assetsAssigned: (assets ?? []).filter((r) => r.status === "assigned").length,
+      assetsInRepair: (assets ?? []).filter((r) => r.status === "in-repair").length,
+      openTickets: (tickets ?? []).filter((r) => !["closed", "resolved"].includes(r.status ?? ""))
         .length,
       avgTenureYears: 0,
     };
@@ -97,7 +106,7 @@ export const insightsService = {
   async attendanceTrend() {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureAttendanceTrend);
     const { data, error } = await supabase
-      .from("attendance")
+      .from("attendance_records")
       .select("attendance_date,status")
       .order("attendance_date");
     if (error) throw error;
@@ -118,12 +127,12 @@ export const insightsService = {
   },
   async headcountTrend() {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureHeadcount);
-    const { data, error } = await supabase.from("employees").select("joined_on,status");
+    const { data, error } = await supabase.from("employees").select("joining_date,employment_status");
     if (error) throw error;
-    return (data ?? []).map((r: any) => ({
-      label: r.joined_on,
+    return (data ?? []).map((r) => ({
+      label: r.joining_date ?? "",
       joined: 1,
-      exited: r.status === "resigned" ? 1 : 0,
+      exited: r.employment_status === "resigned" ? 1 : 0,
       headcount: 1,
     }));
   },
@@ -136,7 +145,9 @@ export const insightsService = {
           openRoles: d.openRoles,
         })),
       );
-    const { data, error } = await supabase.from("departments").select("id,name,employees(id)");
+    const { data, error } = await supabase
+      .from("departments")
+      .select("id,name,employees!employees_department_id_fkey(id)");
     if (error) throw error;
     return (data ?? []).map((d: any) => ({
       name: d.name,
@@ -152,18 +163,19 @@ export const insightsService = {
           value: fixtureLeave.filter((l) => l.type === type).reduce((s, l) => s + l.days, 0),
         })),
       );
-    const { data, error } = await supabase.from("leave").select("leave_type,days");
+    const { data, error } = await supabase.from("leave_requests").select("total_days, leave_types(name)");
     if (error) throw error;
     const map = new Map<string, number>();
-    (data ?? []).forEach((r: any) =>
-      map.set(r.leave_type, (map.get(r.leave_type) ?? 0) + Number(r.days)),
-    );
+    (data ?? []).forEach((r) => {
+      const name = r.leave_types?.name ?? "Other";
+      map.set(name, (map.get(name) ?? 0) + Number(r.total_days ?? 0));
+    });
     return [...map].map(([name, value]) => ({ name, value }));
   },
   async todaySnapshot() {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureAttendance);
     const { data, error } = await supabase
-      .from("attendance")
+      .from("attendance_records")
       .select("*, employees(first_name,last_name), shifts(name)");
     if (error) throw error;
     return data ?? [];

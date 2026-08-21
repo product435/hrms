@@ -19,7 +19,7 @@ import type { ExpenseClaim } from "@/types";
 export const Route = createFileRoute("/expenses")({
   beforeLoad: () => requireAuthForPath("/expenses"),
   head: () => ({
-    meta: [{ title: "Expense claims · Kinetix" }],
+    meta: [{ title: "Expense claims · TeamNest" }],
   }),
   component: ExpensesPage,
 });

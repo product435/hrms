@@ -36,13 +36,13 @@ export const Route = createFileRoute("/")({
   beforeLoad: () => requireAuthForPath("/"),
   head: () => ({
     meta: [
-      { title: "Dashboard · Kinetix HRMS" },
+      { title: "Dashboard · TeamNest" },
       {
         name: "description",
         content:
           "Live workforce dashboard: attendance today, pending approvals, payroll status, hiring pipeline and asset health.",
       },
-      { property: "og:title", content: "Kinetix Dashboard" },
+      { property: "og:title", content: "TeamNest Dashboard" },
       {
         property: "og:description",
         content: "Workforce insights, approvals and self-service in one HR command center.",
@@ -53,10 +53,16 @@ export const Route = createFileRoute("/")({
 });
 
 function DashboardPage() {
-  const { role } = useSession();
+  const { role, isLoading } = useSession();
   return (
     <AppLayout>
-      {role === "employee" ? <EmployeeDashboard /> : <OrgDashboard />}
+      {isLoading ? (
+        <CardsSkeleton count={4} />
+      ) : role === "employee" ? (
+        <EmployeeDashboard />
+      ) : (
+        <OrgDashboard />
+      )}
     </AppLayout>
   );
 }
@@ -294,27 +300,27 @@ function EmployeeDashboard() {
   const { user } = useSession();
   const today = useQuery({
     queryKey: ["attendance-today", user.id],
-    queryFn: () => attendanceService.today(user.id),
+    queryFn: () => attendanceService.today(user.employeeId ?? user.id),
   });
   const balance = useQuery({
     queryKey: ["leave-balance", user.id],
-    queryFn: () => leaveService.balance(user.id),
+    queryFn: () => leaveService.balance(user.employeeId ?? user.id),
   });
   const myLeave = useQuery({
     queryKey: ["leave", user.id],
-    queryFn: () => leaveService.list({ employeeId: user.id }),
+    queryFn: () => leaveService.list({ employeeId: user.employeeId ?? user.id }),
   });
   const myGoals = useQuery({
     queryKey: ["goals", user.name],
-    queryFn: () => talentService.goalsOf(user.name),
+    queryFn: () => talentService.goalsOf(user.employeeId ?? user.id),
   });
   const myAssets = useQuery({
     queryKey: ["assets", user.name],
-    queryFn: () => assetService.assignedTo(user.name),
+    queryFn: () => assetService.assignedTo(user.employeeId ?? user.id),
   });
   const payslips = useQuery({
     queryKey: ["payslips", user.id],
-    queryFn: () => import("@/services/payrollService").then((m) => m.payrollService.payslips({ employeeId: user.id })),
+    queryFn: () => import("@/services/payrollService").then((m) => m.payrollService.payslips({ employeeId: user.employeeId ?? user.id })),
   });
 
   const b = balance.data;

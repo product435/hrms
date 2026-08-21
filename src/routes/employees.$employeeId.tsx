@@ -22,19 +22,22 @@ import { dayMonth, initialsOf, inr, percent, shortDate } from "@/lib/format";
 export const Route = createFileRoute("/employees/$employeeId")({
   beforeLoad: async ({ params }) => {
     const session = await requireAuth();
-    if (session.user.role === "employee" && session.user.id !== params.employeeId) {
+    if (
+      session.user.role === "employee" &&
+      (session.user.employeeId ?? session.user.id) !== params.employeeId
+    ) {
       throw redirect({ to: "/unauthorized" });
     }
   },
   head: () => ({
     meta: [
-      { title: "Employee profile · Kinetix" },
+      { title: "Employee profile · TeamNest" },
       {
         name: "description",
         content:
           "Full employee profile: personal details, employment record, attendance, leave, assets, documents and performance.",
       },
-      { property: "og:title", content: "Employee profile · Kinetix" },
+      { property: "og:title", content: "Employee profile · TeamNest" },
       {
         property: "og:description",
         content: "Personal, employment, attendance, asset and performance records for a single employee.",
@@ -77,22 +80,22 @@ function EmployeeDetailPage() {
   });
   const assets = useQuery({
     queryKey: ["assets", fullName],
-    queryFn: () => assetService.assignedTo(fullName),
+    queryFn: () => assetService.assignedTo(employeeId),
     enabled: Boolean(emp),
   });
   const documents = useQuery({
     queryKey: ["documents", fullName],
-    queryFn: () => workplaceService.documentsOf(fullName),
+    queryFn: () => workplaceService.documentsOf(employeeId),
     enabled: Boolean(emp),
   });
   const goals = useQuery({
     queryKey: ["goals", fullName],
-    queryFn: () => talentService.goalsOf(fullName),
+    queryFn: () => talentService.goalsOf(employeeId),
     enabled: Boolean(emp),
   });
   const reviews = useQuery({
     queryKey: ["reviews", fullName],
-    queryFn: () => talentService.reviewsOf(fullName),
+    queryFn: () => talentService.reviewsOf(employeeId),
     enabled: Boolean(emp),
   });
 

@@ -15,7 +15,7 @@ import type { PerformanceReview } from "@/types";
 export const Route = createFileRoute("/performance")({
   beforeLoad: () => requireAuthForPath("/performance"),
   head: () => ({
-    meta: [{ title: "Performance reviews · Kinetix" }],
+    meta: [{ title: "Performance reviews · TeamNest" }],
   }),
   component: PerformancePage,
 });

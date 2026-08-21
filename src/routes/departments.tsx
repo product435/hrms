@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Plus } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuthForPath } from "@/lib/auth-guard";
@@ -10,18 +10,23 @@ import { DistributionDonut } from "@/components/charts/DistributionDonut";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { employeeService } from "@/services/employeeService";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import { useState } from "react";
 
 export const Route = createFileRoute("/departments")({
   beforeLoad: () => requireAuthForPath("/departments"),
   head: () => ({
     meta: [
-      { title: "Departments & structure · Kinetix" },
+      { title: "Departments & structure · TeamNest" },
       {
         name: "description",
         content:
           "Department headcount, cost centers, open roles and designation ladders across the organisation.",
       },
-      { property: "og:title", content: "Departments · Kinetix" },
+      { property: "og:title", content: "Departments · TeamNest" },
       {
         property: "og:description",
         content: "Org structure with headcount, department heads, cost centers and open roles.",
@@ -32,7 +37,9 @@ export const Route = createFileRoute("/departments")({
 });
 
 function DepartmentsPage() {
+  const [open, setOpen] = useState(false); const [name, setName] = useState(""); const [code, setCode] = useState(""); const queryClient = useQueryClient();
   const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
+  const create = useMutation({ mutationFn: () => { if (!name.trim()) throw new Error("Department name is required."); return employeeService.createDepartment({ name, code }); }, onSuccess: () => { toast.success("Department created"); setName(""); setCode(""); setOpen(false); void queryClient.invalidateQueries({ queryKey: ["departments"] }); }, onError: (e) => toast.error("Could not create department", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
 
   return (
     <AppLayout>
@@ -41,7 +48,7 @@ function DepartmentsPage() {
         title="Departments & structure"
         description="Headcount, ownership and hiring demand for every department and cost center."
         actions={
-          <Button>
+          <Button onClick={() => setOpen(true)}>
             <Plus className="size-4" /> New department
           </Button>
         }
@@ -109,6 +116,7 @@ function DepartmentsPage() {
           )}
         </SectionCard>
       </div>
+      <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>New department</DialogTitle></DialogHeader><div className="space-y-3"><div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div><div><Label>Code</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => create.mutate()} disabled={create.isPending}>{create.isPending ? "Saving…" : "Create department"}</Button></DialogFooter></DialogContent></Dialog>
     </AppLayout>
   );
 }

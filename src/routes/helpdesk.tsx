@@ -18,7 +18,7 @@ import type { HelpdeskTicket } from "@/types";
 export const Route = createFileRoute("/helpdesk")({
   beforeLoad: () => requireAuthForPath("/helpdesk"),
   head: () => ({
-    meta: [{ title: "HR Helpdesk · Kinetix" }],
+    meta: [{ title: "HR Helpdesk · TeamNest" }],
   }),
   component: HelpdeskPage,
 });

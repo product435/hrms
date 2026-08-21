@@ -21,7 +21,7 @@ declare
   review_id uuid := 'ffffffff-ffff-4fff-8fff-ffffffffffff';
   demo jsonb;
 begin
-  demo := jsonb_build_object('id', org_id, 'name', 'Kinetix Demo Organisation', 'slug', 'kinetix-demo', 'timezone', 'Asia/Kolkata', 'currency', 'INR');
+  demo := jsonb_build_object('id', org_id, 'name', 'TeamNest Demo Organisation', 'slug', 'kinetix-demo', 'timezone', 'Asia/Kolkata', 'currency', 'INR');
   if to_regclass('public.organizations') is not null then
     execute 'insert into public.organizations select * from jsonb_populate_record(null::public.organizations, $1) where not exists (select 1 from public.organizations where id = $2)' using demo, org_id;
   end if;

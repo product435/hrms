@@ -7,6 +7,7 @@ import { Brand } from "./Brand";
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { role, user } = useSession();
+  const profileEmployeeId = user.employeeId ?? user.id;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const sections = navForRole(role);
 
@@ -22,11 +23,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
             <li>
               <Link
                 to="/employees/$employeeId"
-                params={{ employeeId: user.id }}
+                params={{ employeeId: profileEmployeeId }}
                 onClick={onNavigate}
                 className={cn(
                   "group flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                  pathname === `/employees/${user.id}`
+                  pathname === `/employees/${profileEmployeeId}`
                     ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-card"
                     : "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
                 )}

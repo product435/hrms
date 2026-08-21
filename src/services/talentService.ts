@@ -7,7 +7,7 @@ import {
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Candidate, Goal, JobOpening, OnboardingJourney, PerformanceReview } from "@/types";
-import { fromFixture, matchesSearch, type QueryOptions } from "./api";
+import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
 const mapJob = (r: any): JobOpening => ({
   id: r.id,
   title: r.title,
@@ -15,21 +15,29 @@ const mapJob = (r: any): JobOpening => ({
   location: r.location ?? "",
   type: r.employment_type,
   openings: r.openings,
-  applicants: r.applicants ?? 0,
-  stage: r.stage,
-  postedOn: r.posted_on ?? "",
-  hiringManager: r.hiring_manager?.full_name ?? "",
+  applicants: r.job_applications?.[0]?.count ?? 0,
+  stage: r.status,
+  postedOn: r.opened_at ?? "",
+  // job_openings has no hiring-manager column in this schema; recruiter is
+  // tracked per application (job_applications.recruiter_id), not per job.
+  hiringManager: "",
 });
-const mapCandidate = (r: any): Candidate => ({
-  id: r.id,
-  name: r.name,
-  role: r.role,
-  stage: r.stage,
-  experience: r.experience ?? "",
-  source: r.source ?? "",
-  rating: Number(r.rating ?? 0),
-  appliedOn: r.applied_on,
-});
+// candidates has no per-application stage/role; those live on job_applications
+// (one candidate can apply to several jobs), so this reads the candidate's
+// most recent application.
+const mapCandidate = (r: any): Candidate => {
+  const application = r.job_applications?.[0];
+  return {
+    id: r.id,
+    name: r.name,
+    role: application?.job_openings?.title ?? "",
+    stage: application?.stage ?? "applied",
+    experience: r.experience_years != null ? `${r.experience_years} yrs` : "",
+    source: r.source ?? "",
+    rating: 0,
+    appliedOn: application?.applied_at ?? "",
+  };
+};
 const mapGoal = (r: any): Goal => ({
   id: r.id,
   employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
@@ -43,14 +51,44 @@ const mapGoal = (r: any): Goal => ({
 const mapReview = (r: any): PerformanceReview => ({
   id: r.id,
   employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
-  cycle: r.cycle,
+  cycle: r.review_cycle,
   reviewer: r.reviewer?.full_name ?? "",
-  selfScore: Number(r.self_score ?? 0),
-  managerScore: Number(r.manager_score ?? 0),
+  selfScore: Number(r.self_rating ?? 0),
+  managerScore: Number(r.manager_rating ?? 0),
   finalRating: Number(r.final_rating ?? 0),
   status: r.status,
 });
 export const talentService = {
+  async createOpening(input: {
+    title: string;
+    departmentId?: string;
+    designationId?: string;
+    location?: string;
+    employmentType: string;
+    openings: number;
+    description?: string;
+  }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const organizationId = await requireOrganizationId();
+    const { data, error } = await supabase
+      .from("job_openings")
+      .insert({
+        organization_id: organizationId,
+        title: input.title.trim(),
+        department_id: input.departmentId || null,
+        designation_id: input.designationId || null,
+        location: input.location?.trim() || null,
+        employment_type: input.employmentType,
+        openings: input.openings,
+        description: input.description?.trim() || null,
+        status: "open",
+        opened_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data;
+  },
   async openings(options: QueryOptions = {}): Promise<JobOpening[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
@@ -61,10 +99,10 @@ export const talentService = {
         ),
       );
     let query = supabase
-      .from("jobs")
-      .select("*, departments(name), hiring_manager:hiring_manager_id(full_name)")
-      .order("created_at", { ascending: false });
-    if (options.status && options.status !== "all") query = query.eq("stage", options.status);
+      .from("job_openings")
+      .select("*, departments(name), job_applications(count)")
+      .order("opened_at", { ascending: false });
+    if (options.status && options.status !== "all") query = query.eq("status", options.status);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
@@ -80,36 +118,47 @@ export const talentService = {
             (!options.status || options.status === "all" || c.stage === options.status),
         ),
       );
-    let query = supabase.from("candidates").select("*").order("applied_on", { ascending: false });
-    if (options.status && options.status !== "all") query = query.eq("stage", options.status);
+    let query = supabase
+      .from("candidates")
+      .select("*, job_applications(stage, applied_at, job_openings(title))")
+      .order("id", { ascending: false });
+    if (options.status && options.status !== "all")
+      query = query.eq("job_applications.stage", options.status);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
       .map(mapCandidate)
       .filter((c) => matchesSearch([c.name, c.role, c.source], options.search));
   },
+  // The schema has no "buddy" or numeric progress column for onboarding;
+  // progress is derived from completed vs. total tasks, and buddy is left
+  // blank rather than invented.
   async onboarding(): Promise<OnboardingJourney[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureOnboarding);
     const { data, error } = await supabase
-      .from("onboarding")
+      .from("onboarding_records")
       .select(
-        "*, employees(first_name,last_name), buddy:buddy_id(full_name), onboarding_tasks(label,is_done,owner:owner_id(full_name))",
+        "*, employees(first_name,last_name), onboarding_tasks(title,completed_at,assignee:assigned_to(full_name))",
       )
-      .order("start_date");
+      .order("joining_date");
     if (error) throw error;
-    return (data ?? []).map((r: any) => ({
-      id: r.id,
-      employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
-      designation: "",
-      startDate: r.start_date,
-      buddy: r.buddy?.full_name ?? "",
-      progress: r.progress,
-      tasks: (r.onboarding_tasks ?? []).map((t: any) => ({
-        label: t.label,
-        owner: t.owner?.full_name ?? "",
-        done: t.is_done,
-      })),
-    }));
+    return (data ?? []).map((r: any) => {
+      const tasks = r.onboarding_tasks ?? [];
+      const done = tasks.filter((t: any) => t.completed_at).length;
+      return {
+        id: r.id,
+        employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
+        designation: "",
+        startDate: r.joining_date ?? "",
+        buddy: "",
+        progress: tasks.length ? Math.round((done / tasks.length) * 100) : 0,
+        tasks: tasks.map((t: any) => ({
+          label: t.title,
+          owner: t.assignee?.full_name ?? "",
+          done: Boolean(t.completed_at),
+        })),
+      };
+    });
   },
   async goals(options: QueryOptions = {}): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -131,13 +180,13 @@ export const talentService = {
       .map(mapGoal)
       .filter((g) => matchesSearch([g.employeeName, g.title, g.category], options.search));
   },
-  async goalsOf(employeeName: string): Promise<Goal[]> {
+  async goalsOf(employeeId: string): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureGoals.filter((g) => g.employeeName === employeeName));
+      return fromFixture(fixtureGoals);
     const { data, error } = await supabase
       .from("goals")
       .select("*, employees!inner(first_name,last_name)")
-      .eq("employees.first_name", employeeName.split(" ")[0]);
+      .eq("employee_id", employeeId);
     if (error) throw error;
     return (data ?? []).map(mapGoal);
   },
@@ -146,17 +195,17 @@ export const talentService = {
     const { data, error } = await supabase
       .from("performance_reviews")
       .select("*, employees(first_name,last_name), reviewer:reviewer_id(full_name)")
-      .order("created_at", { ascending: false });
+      .order("reviewed_at", { ascending: false });
     if (error) throw error;
     return (data ?? []).map(mapReview);
   },
-  async reviewsOf(employeeName: string): Promise<PerformanceReview[]> {
+  async reviewsOf(employeeId: string): Promise<PerformanceReview[]> {
     if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureReviews.filter((r) => r.employeeName === employeeName));
+      return fromFixture(fixtureReviews);
     const { data, error } = await supabase
       .from("performance_reviews")
       .select("*, employees!inner(first_name,last_name), reviewer:reviewer_id(full_name)")
-      .eq("employees.first_name", employeeName.split(" ")[0]);
+      .eq("employee_id", employeeId);
     if (error) throw error;
     return (data ?? []).map(mapReview);
   },

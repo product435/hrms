@@ -20,13 +20,13 @@ import type { Goal } from "@/types";
 export const Route = createFileRoute("/goals")({
   beforeLoad: () => requireAuthForPath("/goals"),
   head: () => ({
-    meta: [{ title: "Goals · Kinetix" }],
+    meta: [{ title: "Goals · TeamNest" }],
   }),
   component: GoalsPage,
 });
 
 function GoalsPage() {
-  const { role, user } = useSession();
+  const { role, user, isLoading } = useSession();
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
@@ -34,9 +34,10 @@ function GoalsPage() {
   const goals = useQuery({
     queryKey: ["goals", isSelfService ? user?.name : "all", search, status],
     queryFn: () =>
-      isSelfService && user?.name
-        ? talentService.goalsOf(user.name)
+      isSelfService
+        ? talentService.goalsOf(user.employeeId ?? user.id)
         : talentService.goals({ search, status }),
+    enabled: !isLoading,
   });
 
   const atRisk = (goals.data ?? []).filter((goal) => goal.status === "at-risk" || goal.status === "delayed").length;

@@ -1,39 +1,71 @@
 import { payrollRuns as fixtureRuns, payslips as fixturePayslips } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PayrollRun, Payslip } from "@/types";
-import { fromFixture, matchesSearch, type QueryOptions } from "./api";
-const mapRun = (r: any): PayrollRun => ({
-  id: r.id,
-  period: r.period,
-  employees: r.employee_count,
-  gross: Number(r.gross),
-  deductions: Number(r.deductions),
-  net: Number(r.net),
-  status: r.status,
-  payDate: r.pay_date ?? "",
-});
-const mapPayslip = (r: any): Payslip => ({
-  id: r.id,
-  employeeId: r.employee_id,
-  employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
-  period: r.period,
-  basic: Number(r.basic),
-  hra: Number(r.hra),
-  allowances: Number(r.allowances),
-  bonus: Number(r.bonus),
-  pf: Number(r.pf),
-  tax: Number(r.tax),
-  otherDeductions: Number(r.other_deductions),
-  net: Number(r.net),
-  status: r.status,
-});
+import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+const periodOf = (year: unknown, month: unknown) =>
+  year && month ? `${year}-${String(month).padStart(2, "0")}` : "";
+
+const mapRun = (r: any): PayrollRun => {
+  const records = r.payroll_records ?? [];
+  return {
+    id: r.id,
+    period: periodOf(r.year, r.month),
+    employees: records.length,
+    gross: records.reduce((s: number, rec: any) => s + Number(rec.gross_salary ?? 0), 0),
+    deductions: records.reduce((s: number, rec: any) => s + Number(rec.total_deductions ?? 0), 0),
+    net: records.reduce((s: number, rec: any) => s + Number(rec.net_salary ?? 0), 0),
+    status: r.status,
+    payDate: r.processed_at ?? "",
+  };
+};
+// `payroll_records` carries the numbers per employee per run; `payslips` only
+// links a record to a generated PDF. `basic`/`hra`/`allowances`/`bonus` aren't
+// tracked per run in this schema (only the current `salary_structures` row),
+// so they read from there as a best-effort snapshot rather than the figures
+// actually used for that specific run.
+const mapPayslip = (r: any): Payslip => {
+  const structure = r.employees?.salary_structures?.[0];
+  const totalDeductions = Number(r.total_deductions ?? 0);
+  const pf = Number(r.pf ?? 0);
+  const tax = Number(r.tax ?? 0);
+  return {
+    id: r.payslips?.[0]?.id ?? r.id,
+    employeeId: r.employee_id,
+    employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
+    period: periodOf(r.payroll_runs?.year, r.payroll_runs?.month),
+    basic: Number(structure?.basic ?? 0),
+    hra: Number(structure?.hra ?? 0),
+    allowances: Number(structure?.allowances ?? 0),
+    bonus: Number(structure?.bonus ?? 0),
+    pf,
+    tax,
+    otherDeductions: Math.max(totalDeductions - pf - tax, 0),
+    net: Number(r.net_salary ?? 0),
+    status: r.payment_status === "paid" ? "paid" : "pending",
+  };
+};
 export const payrollService = {
+  async startRun(input: { year: number; month: number }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const organizationId = await requireOrganizationId();
+    const { data, error } = await supabase
+      .from("payroll_runs")
+      .upsert(
+        { organization_id: organizationId, year: input.year, month: input.month, status: "draft" },
+        { onConflict: "organization_id,year,month", ignoreDuplicates: false },
+      )
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data;
+  },
   async runs(): Promise<PayrollRun[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureRuns);
     const { data, error } = await supabase
       .from("payroll_runs")
-      .select("*")
-      .order("period", { ascending: false });
+      .select("*, payroll_records(gross_salary,net_salary,total_deductions)")
+      .order("year", { ascending: false })
+      .order("month", { ascending: false });
     if (error) throw error;
     return (data ?? []).map(mapRun);
   },
@@ -48,11 +80,13 @@ export const payrollService = {
         ),
       );
     let query = supabase
-      .from("payslips")
-      .select("*, employees(first_name,last_name)")
-      .order("period", { ascending: false });
+      .from("payroll_records")
+      .select(
+        "*, employees(first_name,last_name, salary_structures(basic,hra,allowances,bonus)), payroll_runs(year,month), payslips(id)",
+      )
+      .order("payroll_run_id", { ascending: false });
     if (options.employeeId) query = query.eq("employee_id", options.employeeId);
-    if (options.status && options.status !== "all") query = query.eq("status", options.status);
+    if (options.status && options.status !== "all") query = query.eq("payment_status", options.status);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
@@ -64,9 +98,9 @@ export const payrollService = {
     const { data, error } = await supabase
       .from("payslips")
       .select("payslip_url")
-      .eq("id", id)
-      .single();
+      .eq("payroll_record_id", id)
+      .maybeSingle();
     if (error) throw error;
-    return { id, url: data.payslip_url };
+    return { id, url: data?.payslip_url ?? null };
   },
 };

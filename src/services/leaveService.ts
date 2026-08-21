@@ -8,14 +8,14 @@ function mapLeave(row: any): LeaveRequest {
     id: row.id,
     employeeId: row.employee_id,
     employeeName: row.employees ? `${row.employees.first_name} ${row.employees.last_name}` : "",
-    type: row.leave_type,
-    from: row.from_date,
-    to: row.to_date,
-    days: Number(row.days),
+    type: row.leave_types?.name ?? "",
+    from: row.start_date,
+    to: row.end_date,
+    days: Number(row.total_days ?? 0),
     reason: row.reason,
     status: row.status,
-    appliedOn: row.applied_on,
-    approver: row.approver?.full_name ?? "",
+    appliedOn: row.start_date,
+    approver: row.approved_by_profile?.full_name ?? "",
   };
 }
 export const leaveService = {
@@ -31,7 +31,9 @@ export const leaveService = {
       );
     let query = supabase
       .from("leave_requests")
-      .select("*");
+      .select(
+        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)",
+      );
     if (options.employeeId) query = query.eq("employee_id", options.employeeId);
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
     const { data, error } = await query;
@@ -47,7 +49,9 @@ export const leaveService = {
       );
     const { data, error } = await supabase
       .from("leave_requests")
-      .select("*")
+      .select(
+        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)",
+      )
       .eq("status", "pending");
     if (error) throw error;
     return (data ?? []).map(mapLeave);
@@ -63,13 +67,28 @@ export const leaveService = {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ ...payload, status: "pending" as const });
     const employeeId = await requireEmployeeId();
+    const { data: leaveType, error: leaveTypeError } = await supabase
+      .from("leave_types")
+      .select("id")
+      .ilike("name", `%${payload.type}%`)
+      .maybeSingle();
+    if (leaveTypeError) throw leaveTypeError;
+    const totalDays =
+      Math.round(
+        (new Date(payload.to).getTime() - new Date(payload.from).getTime()) / 86400000,
+      ) + 1;
     const { data, error } = await supabase
       .from("leave_requests")
       .insert({
         employee_id: employeeId,
+        leave_type_id: leaveType?.id ?? null,
+        start_date: payload.from,
+        end_date: payload.to,
+        total_days: totalDays,
         reason: payload.reason,
+        status: "pending",
       })
-      .select()
+      .select("*, employees(first_name,last_name), leave_types(name)")
       .single();
     if (error) throw error;
     return mapLeave(data);
@@ -80,7 +99,7 @@ export const leaveService = {
       .from("leave_requests")
       .update({ status: decision })
       .eq("id", id)
-      .select()
+      .select("*, employees(first_name,last_name), leave_types(name)")
       .single();
     if (error) throw error;
     return mapLeave(data);

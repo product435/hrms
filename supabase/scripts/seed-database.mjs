@@ -53,7 +53,7 @@ async function seedDatabase() {
       const { data: newOrg, error: orgError } = await admin
         .from("organizations")
         .insert({
-          name: "Kinetix Demo Organization",
+          name: "TeamNest Demo Organization",
           slug: "kinetix-demo",
           timezone: "Asia/Kolkata",
           currency: "INR",
@@ -595,7 +595,7 @@ async function seedDatabase() {
     // Create announcements
     console.log("\nStep 14: Creating announcements...");
     const announcements = [
-      { title: "Welcome to Kinetix", body: "Excited to have you on board!" },
+      { title: "Welcome to TeamNest", body: "Excited to have you on board!" },
       { title: "New Leave Policy", body: "Updated leave policy effective immediately" },
       { title: "Team Outing", body: "Join us for the annual team outing on 25th Aug" },
     ];

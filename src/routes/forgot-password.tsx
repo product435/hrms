@@ -12,7 +12,7 @@ import { authService } from "@/services/authService";
 export const Route = createFileRoute("/forgot-password")({
   beforeLoad: () => redirectIfAuthenticated(),
   head: () => ({
-    meta: [{ title: "Forgot password · Kinetix" }],
+    meta: [{ title: "Forgot password · TeamNest" }],
   }),
   component: ForgotPasswordPage,
 });

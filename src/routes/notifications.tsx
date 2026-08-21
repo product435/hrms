@@ -12,7 +12,7 @@ import { workplaceService } from "@/services/workplaceService";
 export const Route = createFileRoute("/notifications")({
   beforeLoad: () => requireAuthForPath("/notifications"),
   head: () => ({
-    meta: [{ title: "Notifications · Kinetix" }],
+    meta: [{ title: "Notifications · TeamNest" }],
   }),
   component: NotificationsPage,
 });

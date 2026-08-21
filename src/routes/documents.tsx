@@ -18,13 +18,13 @@ import type { DocumentItem } from "@/types";
 export const Route = createFileRoute("/documents")({
   beforeLoad: () => requireAuthForPath("/documents"),
   head: () => ({
-    meta: [{ title: "Documents · Kinetix" }],
+    meta: [{ title: "Documents · TeamNest" }],
   }),
   component: DocumentsPage,
 });
 
 function DocumentsPage() {
-  const { role, user } = useSession();
+  const { role, user, isLoading } = useSession();
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
@@ -32,9 +32,10 @@ function DocumentsPage() {
   const documents = useQuery({
     queryKey: ["documents", isSelfService ? user?.name : "all", search, category],
     queryFn: () =>
-      isSelfService && user?.name
-        ? workplaceService.documentsOf(user.name)
+      isSelfService
+        ? workplaceService.documentsOf(user.employeeId ?? user.id)
         : workplaceService.documents({ search, category }),
+    enabled: !isLoading,
   });
 
   const columns = useMemo<Column<DocumentItem>[]>(
