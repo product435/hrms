@@ -211,7 +211,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link to="/employees/$employeeId" params={{ employeeId: user.id }}>
+              <Link to="/employees/$employeeId" params={{ employeeId: user.employeeId ?? user.id }}>
                 <UserCircle2 className="size-4" /> My profile
               </Link>
             </DropdownMenuItem>

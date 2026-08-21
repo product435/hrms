@@ -11,6 +11,7 @@ import { FilterBar } from "@/components/common/FilterBar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { employeeService } from "@/services/employeeService";
+import { useSession } from "@/hooks/useSession";
 import { initialsOf, shortDate } from "@/lib/format";
 import type { Employee } from "@/types";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -42,6 +43,7 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [status, setStatus] = useState("all");
+  const { role, user } = useSession();
   const [addOpen, setAddOpen] = useState(false);
   const [form, setForm] = useState({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" });
   const queryClient = useQueryClient();
@@ -49,12 +51,12 @@ function EmployeesPage() {
   const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
   const employees = useQuery({
     queryKey: ["employees", search, department, status],
-    queryFn: () => employeeService.list({ search, department, status }),
+    queryFn: () => role === "manager" && user.employeeId ? employeeService.teamOf(user.employeeId) : employeeService.list({ search, department, status }),
   });
   const addEmployee = useMutation({
     mutationFn: () => {
       if (!form.firstName || !form.lastName || !form.email || !form.employeeCode || !form.joiningDate) throw new Error("First name, last name, email, employee code and joining date are required.");
-      return employeeService.create(form);
+      return employeeService.create(role === "manager" && user.employeeId ? { ...form, managerId: user.employeeId } : form);
     },
     onSuccess: () => { toast.success("Employee added"); setAddOpen(false); setForm({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" }); void queryClient.invalidateQueries({ queryKey: ["employees"] }); },
     onError: (e) => toast.error("Could not add employee", { description: e instanceof Error ? e.message : "Supabase request failed." }),
@@ -116,7 +118,7 @@ function EmployeesPage() {
         description="Browse every employee record, filter by department or status, and open a profile for full details."
         actions={
           <>
-            <Button variant="outline" onClick={exportEmployees} disabled={employees.isLoading || !employees.data?.length}>
+            <Button variant="outline" onClick={exportEmployees} disabled={employees.isLoading}>
               <Download className="size-4" /> Export
             </Button>
             <Button onClick={() => setAddOpen(true)}>

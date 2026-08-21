@@ -188,7 +188,7 @@ export const ROUTE_ROLES: Record<string, Role[]> = {
   "/helpdesk": ["admin", "hr", "manager", "employee"],
   "/reports": ["admin", "hr", "manager"],
   "/audit": ["admin", "hr"],
-  "/settings": ["admin", "hr"],
+  "/settings": ["admin", "hr", "manager"],
 };
 
 export function rolesForPath(pathname: string): Role[] | null {

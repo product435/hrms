@@ -72,8 +72,8 @@ function OrgDashboard() {
   const summary = useQuery({ queryKey: ["summary"], queryFn: () => insightsService.companySummary() });
   const trend = useQuery({ queryKey: ["attendance-trend"], queryFn: () => insightsService.attendanceTrend() });
   const headcount = useQuery({ queryKey: ["headcount-trend"], queryFn: () => insightsService.headcountTrend() });
-  const distribution = useQuery({ queryKey: ["dept-distribution"], queryFn: () => insightsService.departmentDistribution() });
-  const pending = useQuery({ queryKey: ["leave", "all"], queryFn: () => leaveService.list({ status: "pending" }) });
+  const distribution = useQuery({ queryKey: ["dept-distribution", role, user.employeeId], queryFn: () => insightsService.departmentDistribution(role === "manager" ? user.employeeId : undefined) });
+  const pending = useQuery({ queryKey: ["leave", "pending", role, user.id], queryFn: () => role === "manager" ? leaveService.pendingApprovals(user.id) : leaveService.list({ status: "pending" }) });
   const openings = useQuery({ queryKey: ["openings", "open"], queryFn: () => talentService.openings({ status: "open" }) });
   const announcements = useQuery({ queryKey: ["announcements"], queryFn: () => workplaceService.announcements() });
 
@@ -302,10 +302,6 @@ function EmployeeDashboard() {
     queryKey: ["attendance-today", user.id],
     queryFn: () => attendanceService.today(user.employeeId ?? user.id),
   });
-  const balance = useQuery({
-    queryKey: ["leave-balance", user.id],
-    queryFn: () => leaveService.balance(user.employeeId ?? user.id),
-  });
   const myLeave = useQuery({
     queryKey: ["leave", user.id],
     queryFn: () => leaveService.list({ employeeId: user.employeeId ?? user.id }),
@@ -322,8 +318,6 @@ function EmployeeDashboard() {
     queryKey: ["payslips", user.id],
     queryFn: () => import("@/services/payrollService").then((m) => m.payrollService.payslips({ employeeId: user.employeeId ?? user.id })),
   });
-
-  const b = balance.data;
 
   return (
     <>
@@ -357,10 +351,10 @@ function EmployeeDashboard() {
         />
         <StatCard
           label="Leave balance"
-          value={String((b?.casual ?? 0) + (b?.sick ?? 0) + (b?.earned ?? 0))}
+          value="—"
           icon={ClipboardList}
           tone="info"
-          hint={`Casual ${b?.casual ?? 0} · Sick ${b?.sick ?? 0} · Earned ${b?.earned ?? 0}`}
+          hint="Balance ledger unavailable"
         />
         <StatCard
           label="Last net pay"

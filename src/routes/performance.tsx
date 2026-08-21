@@ -10,6 +10,7 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/State
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { talentService } from "@/services/talentService";
+import { useSession } from "@/hooks/useSession";
 import type { PerformanceReview } from "@/types";
 
 export const Route = createFileRoute("/performance")({
@@ -21,9 +22,10 @@ export const Route = createFileRoute("/performance")({
 });
 
 function PerformancePage() {
+  const { role, user } = useSession();
   const reviews = useQuery({
-    queryKey: ["performance-reviews"],
-    queryFn: () => talentService.reviews(),
+    queryKey: ["performance-reviews", role, user.employeeId],
+    queryFn: () => talentService.reviews(role === "manager" ? user.employeeId : undefined),
   });
 
   const inProgress = (reviews.data ?? []).filter((row) => row.status === "in-progress").length;

@@ -45,7 +45,7 @@ function PayrollPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
 
-  const runs = useQuery({ queryKey: ["payroll-runs"], queryFn: () => payrollService.runs() });
+  const runs = useQuery({ queryKey: ["payroll-runs"], queryFn: () => payrollService.runs(), enabled: !isSelfService });
   const payslips = useQuery({
     queryKey: ["payslips", isSelfService ? user.id : "all", search, status],
     queryFn: () =>
@@ -102,11 +102,15 @@ function PayrollPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() =>
-              toast.info("Payslip download", {
-                description: `PDF generation for ${row.period} will be wired to the backend.`,
-              })
-            }
+            onClick={async () => {
+              try {
+                const result = await payrollService.downloadPayslip(row.id);
+                if (result.url) window.open(result.url, "_blank", "noopener,noreferrer");
+                else toast.info("No payslip file available", { description: `There is no PDF attached for ${row.period}.` });
+              } catch (error) {
+                toast.error("Could not download payslip", { description: error instanceof Error ? error.message : "Supabase request failed." });
+              }
+            }}
           >
             <Download className="size-3.5" /> Download
           </Button>

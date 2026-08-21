@@ -136,7 +136,7 @@ export const insightsService = {
       headcount: 1,
     }));
   },
-  async departmentDistribution() {
+  async departmentDistribution(managerId?: string) {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
         fixtureDepartments.map((d) => ({
@@ -145,15 +145,17 @@ export const insightsService = {
           openRoles: d.openRoles,
         })),
       );
-    const { data, error } = await supabase
-      .from("departments")
-      .select("id,name,employees!employees_department_id_fkey(id)");
-    if (error) throw error;
-    return (data ?? []).map((d: any) => ({
-      name: d.name,
-      value: (d.employees ?? []).length,
-      openRoles: 0,
-    }));
+    const [{ data: departments, error: departmentError }, { data: employees, error: employeeError }] = await Promise.all([
+      supabase.from("departments").select("id,name"),
+      managerId
+        ? supabase.from("employees").select("department_id").eq("manager_id", managerId)
+        : supabase.from("employees").select("department_id"),
+    ]);
+    if (departmentError) throw departmentError;
+    if (employeeError) throw employeeError;
+    const counts = new Map<string, number>();
+    (employees ?? []).forEach((employee) => { if (employee.department_id) counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1); });
+    return (departments ?? []).map((d) => ({ name: d.name ?? "Unassigned", value: counts.get(d.id) ?? 0, openRoles: 0 }));
   },
   async leaveMix() {
     if (!isSupabaseConfigured || !supabase)

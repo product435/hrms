@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { authService, type AuthSession } from "@/services/authService";
 import type { Role, SessionUser } from "@/types";
 
@@ -37,6 +38,7 @@ const SessionContext = createContext<SessionContextValue>({
 });
 
 export function SessionProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<AuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -75,11 +77,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       role: session?.user?.role ?? "employee",
       isAuthenticated: Boolean(session),
       isLoading,
-      signOut: () => authService.signOut(),
+      signOut: () => {
+        queryClient.clear();
+        void authService.signOut();
+      },
       can: (roles) => (session ? roles.includes(session.user.role) : false),
       refresh: () => setSession(authService.getSession()),
     }),
-    [session, isLoading],
+    [session, isLoading, queryClient],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

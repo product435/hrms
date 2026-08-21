@@ -106,7 +106,7 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Reports & Analytics", to: "/reports", icon: ChartBar, roles: ["admin", "hr"] },
       { label: "Activity History", to: "/audit", icon: Activity, roles: [] },
-      { label: "Settings", to: "/settings", icon: Settings, roles: ["admin"] },
+      { label: "Settings", to: "/settings", icon: Settings, roles: ["admin", "manager"] },
     ],
   },
 ];

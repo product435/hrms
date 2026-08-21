@@ -52,7 +52,8 @@ export const leaveService = {
       .select(
         "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)",
       )
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .eq("current_approver", approver);
     if (error) throw error;
     return (data ?? []).map(mapLeave);
   },

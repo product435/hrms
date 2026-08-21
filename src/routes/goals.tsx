@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Target } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -16,6 +16,10 @@ import { percent, shortDate } from "@/lib/format";
 import { useSession } from "@/hooks/useSession";
 import { talentService } from "@/services/talentService";
 import type { Goal } from "@/types";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/goals")({
   beforeLoad: () => requireAuthForPath("/goals"),
@@ -30,15 +34,21 @@ function GoalsPage() {
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
+  const [open, setOpen] = useState(false); const [form, setForm] = useState({ title: "", dueDate: "", weight: "" }); const queryClient = useQueryClient();
 
   const goals = useQuery({
     queryKey: ["goals", isSelfService ? user?.name : "all", search, status],
     queryFn: () =>
       isSelfService
         ? talentService.goalsOf(user.employeeId ?? user.id)
-        : talentService.goals({ search, status }),
+        : talentService.goals(
+            role === "manager" && user.employeeId
+              ? { search, status, managerId: user.employeeId }
+              : { search, status },
+          ),
     enabled: !isLoading,
   });
+  const addGoal = useMutation({ mutationFn: () => { if (!(role === "manager" || role === "employee") || !user.employeeId) throw new Error("Your employee profile is not linked."); if (!form.title.trim()) throw new Error("Goal title is required."); return talentService.createGoal({ employeeId: user.employeeId, title: form.title, category: "Business", dueDate: form.dueDate, weight: Number(form.weight) || 0 }); }, onSuccess: () => { toast.success("Goal added"); setOpen(false); setForm({ title: "", dueDate: "", weight: "" }); void queryClient.invalidateQueries({ queryKey: ["goals"] }); }, onError: (e) => toast.error("Could not add goal", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
 
   const atRisk = (goals.data ?? []).filter((goal) => goal.status === "at-risk" || goal.status === "delayed").length;
 
@@ -92,7 +102,7 @@ function GoalsPage() {
         title={isSelfService ? "My goals" : "Goals & OKRs"}
         description="Track objectives, weights and completion across the organisation."
         actions={
-          <Button>
+          <Button onClick={() => setOpen(true)} disabled={role !== "manager" && role !== "employee"}>
             <Plus className="size-4" /> Add goal
           </Button>
         }
@@ -129,6 +139,7 @@ function GoalsPage() {
       ) : (
         <DataTable columns={columns} data={visible} rowKey={(row) => row.id} />
       )}
+      <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>Add goal</DialogTitle></DialogHeader><div className="grid gap-3"><div><Label>Title</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div><div className="grid grid-cols-2 gap-3"><div><Label>Due date</Label><Input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></div><div><Label>Weight</Label><Input type="number" min="0" max="100" value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} /></div></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => addGoal.mutate()} disabled={addGoal.isPending}>{addGoal.isPending ? "Saving…" : "Add goal"}</Button></DialogFooter></DialogContent></Dialog>
     </AppLayout>
   );
 }

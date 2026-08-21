@@ -84,11 +84,39 @@ export const workplaceService = {
       return fromFixture(
         fixtureDocuments,
       );
-    let query = supabase.from("documents").select("*, employees(first_name,last_name)");
-    query = query.or(`employee_id.is.null,employee_id.eq.${employeeId}`);
+    const query = supabase
+      .from("documents")
+      .select("*, employees(first_name,last_name)")
+      .eq("employee_id", employeeId)
+      .order("uploaded_at", { ascending: false });
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(mapDocument);
+  },
+  async uploadDocument(file: File, employeeId: string, category = "Other") {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const path = `${employeeId}/${crypto.randomUUID()}-${file.name}`;
+    const storage = supabase.storage.from("documents");
+    const upload = await storage.upload(path, file, { upsert: false });
+    if (upload.error) throw upload.error;
+    try {
+      const uploadedBy = await currentUserId();
+      const { data, error } = await supabase.from("documents").insert({
+        employee_id: employeeId,
+        title: file.name,
+        category,
+        file_size: file.size,
+        file_type: file.type || null,
+        file_url: path,
+        uploaded_by: uploadedBy,
+      }).select("id").single();
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      // Do not leave an orphaned object when the metadata insert is rejected.
+      await storage.remove([path]);
+      throw error;
+    }
   },
   async expenses(options: QueryOptions = {}): Promise<ExpenseClaim[]> {
     if (!isSupabaseConfigured || !supabase)

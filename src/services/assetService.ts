@@ -89,7 +89,8 @@ export const assetService = {
     const { data, error } = await supabase
       .from("asset_assignments")
       .select("asset_id")
-      .eq("employee_id", employee.id);
+      .eq("employee_id", employee.id)
+      .is("returned_at", null);
     if (error) throw error;
     const assetIds = (data ?? []).map((row: any) => row.asset_id).filter(Boolean);
     if (!assetIds.length) return [];
@@ -100,11 +101,18 @@ export const assetService = {
     if (assets.error) throw assets.error;
     return (assets.data ?? []).map(mapAsset);
   },
-  async history(tag?: string): Promise<AssetEvent[]> {
+  async history(tag?: string, employeeId?: string): Promise<AssetEvent[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(tag ? fixtureEvents.filter((e) => e.assetTag === tag) : fixtureEvents);
     let query = supabase.from("asset_repairs").select("*, assets(asset_code)");
     if (tag) query = query.eq("assets.asset_code", tag);
+    if (employeeId) {
+      const assignments = await supabase.from("asset_assignments").select("asset_id").eq("employee_id", employeeId);
+      if (assignments.error) throw assignments.error;
+      const ids = (assignments.data ?? []).map((row) => row.asset_id).filter(Boolean);
+      if (!ids.length) return [];
+      query = query.in("asset_id", ids as string[]);
+    }
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])

@@ -66,6 +66,7 @@ export const employeeService = {
     designationId?: string;
     employmentType: string;
     joiningDate: string;
+    managerId?: string;
   }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const organizationId = await requireOrganizationId();
@@ -82,6 +83,7 @@ export const employeeService = {
         employment_type: input.employmentType,
         employment_status: "active",
         joining_date: input.joiningDate,
+        manager_id: input.managerId || null,
       })
       .select("id")
       .single();
@@ -135,24 +137,15 @@ export const employeeService = {
     if (error) throw error;
     return data ? mapEmployee(data) : null;
   },
-  async teamOf(managerName: string): Promise<Employee[]> {
+  async teamOf(managerId: string): Promise<Employee[]> {
     if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureEmployees.filter((e) => e.managerName === managerName));
-    const [firstName, ...rest] = managerName.trim().split(" ");
-    const manager = await supabase
-      .from("employees")
-      .select("id")
-      .eq("first_name", firstName ?? "")
-      .eq("last_name", rest.join(" "))
-      .maybeSingle();
-    if (manager.error) throw manager.error;
-    if (!manager.data) return [];
+      return fromFixture(fixtureEmployees.filter((e) => e.managerName));
     const { data, error } = await supabase
       .from("employees")
       .select(
         "*, departments!employees_department_id_fkey(name), designations!employees_designation_id_fkey(name), shifts(name), manager:manager_id(first_name,last_name), profiles!employees_profile_fk(role, avatar_url)",
       )
-      .eq("manager_id", manager.data.id);
+      .eq("manager_id", managerId);
     if (error) throw error;
     return (data ?? []).map(mapEmployee);
   },

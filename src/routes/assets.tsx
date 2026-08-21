@@ -58,7 +58,7 @@ function AssetsPage() {
         : assetService.list({ search, status, category }),
     enabled: !isLoading,
   });
-  const history = useQuery({ queryKey: ["asset-history"], queryFn: () => assetService.history() });
+  const history = useQuery({ queryKey: ["asset-history", isSelfService ? user.employeeId : "all"], queryFn: () => assetService.history(undefined, isSelfService ? user.employeeId : undefined) });
 
   const returnAsset = useMutation({
     mutationFn: (tag: string) => assetService.markReturned(tag),

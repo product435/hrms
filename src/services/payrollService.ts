@@ -98,7 +98,7 @@ export const payrollService = {
     const { data, error } = await supabase
       .from("payslips")
       .select("payslip_url")
-      .eq("payroll_record_id", id)
+      .or(`id.eq.${id},payroll_record_id.eq.${id}`)
       .maybeSingle();
     if (error) throw error;
     return { id, url: data?.payslip_url ?? null };

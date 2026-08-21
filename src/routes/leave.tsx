@@ -71,7 +71,10 @@ function LeavePage() {
   const scope = isSelfService ? { employeeId: user.employeeId ?? user.id } : {};
   const requests = useQuery({
     queryKey: ["leave", scope, search, status],
-    queryFn: () => leaveService.list({ ...scope, search, status }),
+    queryFn: () =>
+      role === "manager"
+        ? leaveService.pendingApprovals(user.id).then((rows) => rows.filter((row) => (!status || status === "all" || row.status === status) && (!search || `${row.employeeName} ${row.type} ${row.reason}`.toLowerCase().includes(search.toLowerCase()))))
+        : leaveService.list({ ...scope, search, status }),
   });
   const balance = useQuery({
     queryKey: ["leave-balance", user.id],

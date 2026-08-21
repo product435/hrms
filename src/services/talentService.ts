@@ -160,7 +160,7 @@ export const talentService = {
       };
     });
   },
-  async goals(options: QueryOptions = {}): Promise<Goal[]> {
+  async goals(options: QueryOptions & { managerId?: string } = {}): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
         fixtureGoals.filter(
@@ -171,14 +171,29 @@ export const talentService = {
       );
     let query = supabase
       .from("goals")
-      .select("*, employees(first_name,last_name)")
+      .select("*, employees!inner(first_name,last_name,manager_id)")
       .order("due_date");
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
+    if (options.managerId) query = query.eq("employees.manager_id", options.managerId);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
       .map(mapGoal)
       .filter((g) => matchesSearch([g.employeeName, g.title, g.category], options.search));
+  },
+  async createGoal(input: { employeeId: string; title: string; category: string; dueDate?: string; weight?: number }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase.from("goals").insert({
+      employee_id: input.employeeId,
+      title: input.title.trim(),
+      category: input.category,
+      due_date: input.dueDate || null,
+      weight: input.weight ?? 0,
+      progress: 0,
+      status: "on-track",
+    }).select("id").single();
+    if (error) throw error;
+    return data;
   },
   async goalsOf(employeeId: string): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -190,12 +205,14 @@ export const talentService = {
     if (error) throw error;
     return (data ?? []).map(mapGoal);
   },
-  async reviews(): Promise<PerformanceReview[]> {
+  async reviews(managerId?: string): Promise<PerformanceReview[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureReviews);
-    const { data, error } = await supabase
+    let query = supabase
       .from("performance_reviews")
-      .select("*, employees(first_name,last_name), reviewer:reviewer_id(full_name)")
+      .select("*, employees!inner(first_name,last_name,manager_id), reviewer:reviewer_id(full_name)")
       .order("reviewed_at", { ascending: false });
+    if (managerId) query = query.eq("employees.manager_id", managerId);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(mapReview);
   },

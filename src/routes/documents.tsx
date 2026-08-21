@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Upload } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -9,6 +9,7 @@ import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { shortDate } from "@/lib/format";
 import { useSession } from "@/hooks/useSession";
@@ -28,6 +29,19 @@ function DocumentsPage() {
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
+  const fileInput = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      if (!user.employeeId) throw new Error("Your employee profile is not linked.");
+      return workplaceService.uploadDocument(file, user.employeeId);
+    },
+    onSuccess: () => {
+      toast.success("Document uploaded");
+      void queryClient.invalidateQueries({ queryKey: ["documents"] });
+    },
+    onError: (error) => toast.error("Could not upload document", { description: error instanceof Error ? error.message : "Supabase request failed." }),
+  });
 
   const documents = useQuery({
     queryKey: ["documents", isSelfService ? user?.name : "all", search, category],
@@ -36,6 +50,7 @@ function DocumentsPage() {
         ? workplaceService.documentsOf(user.employeeId ?? user.id)
         : workplaceService.documents({ search, category }),
     enabled: !isLoading,
+    retry: false,
   });
 
   const columns = useMemo<Column<DocumentItem>[]>(
@@ -85,9 +100,12 @@ function DocumentsPage() {
         title={isSelfService ? "My documents" : "Document library"}
         description="Identity proofs, contracts, policies and payroll documents with verification status."
         actions={
-          <Button>
+          <>
+            {isSelfService ? <input ref={fileInput} type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) upload.mutate(file); }} /> : null}
+            <Button onClick={() => isSelfService ? fileInput.current?.click() : undefined} disabled={upload.isPending}>
             <Upload className="size-4" /> Upload
-          </Button>
+            </Button>
+          </>
         }
       />
 

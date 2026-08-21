@@ -88,19 +88,36 @@ export const attendanceService = {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ employeeId, source, at: new Date().toISOString() });
     const resolved = await requireEmployeeId(employeeId);
+    const existing = await supabase
+      .from("attendance_records")
+      .select("id,check_in,check_out")
+      .eq("employee_id", resolved)
+      .eq("attendance_date", new Date().toISOString().slice(0, 10))
+      .maybeSingle();
+    if (existing.error) throw existing.error;
+    if (field === "check_in" && existing.data?.check_in) throw new Error("You are already checked in today.");
+    if (field === "check_out" && !existing.data?.check_in) throw new Error("Check in before checking out.");
+    if (field === "check_out" && existing.data?.check_out) throw new Error("You are already checked out today.");
     const date = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from("attendance_records")
-      .upsert({
-        employee_id: resolved,
-        attendance_date: date,
-        source,
-        status: "present",
-        ...(field === "check_in" ? { check_in: now } : { check_out: now }),
-      })
-      .select()
-      .single();
+    const request = existing.data
+      ? field === "check_in"
+        ? supabase
+            .from("attendance_records")
+            .update({ check_in: now, source, status: "present" })
+            .eq("id", existing.data.id)
+        : supabase
+            .from("attendance_records")
+            .update({ check_out: now, source, status: "present" })
+            .eq("id", existing.data.id)
+      : supabase.from("attendance_records").insert({
+          employee_id: resolved,
+          attendance_date: date,
+          check_in: now,
+          source,
+          status: "present",
+        });
+    const { data, error } = await request.select().single();
     if (error) throw error;
     return data;
   },
@@ -137,12 +154,14 @@ export const attendanceService = {
     if (error) throw error;
     return (data ?? []).map(mapShift);
   },
-  async weeklyTrend(): Promise<TrendPoint[]> {
+  async weeklyTrend(employeeId?: string): Promise<TrendPoint[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureTrend);
-    const { data, error } = await supabase
+    let query = supabase
       .from("attendance_records")
       .select("attendance_date,status")
       .gte("attendance_date", new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10));
+    if (employeeId) query = query.eq("employee_id", employeeId);
+    const { data, error } = await query;
     if (error) throw error;
     const grouped = new Map<string, TrendPoint>();
     (data ?? []).forEach((r: any) => {

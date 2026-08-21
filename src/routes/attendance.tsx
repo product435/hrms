@@ -50,21 +50,21 @@ function AttendancePage() {
     queryKey: ["attendance", scope, search, status],
     queryFn: () => attendanceService.list({ ...scope, search, status }),
   });
-  const trend = useQuery({ queryKey: ["attendance-trend"], queryFn: () => attendanceService.weeklyTrend() });
-  const corrections = useQuery({ queryKey: ["corrections"], queryFn: () => attendanceService.corrections() });
+  const trend = useQuery({ queryKey: ["attendance-trend", isSelfService ? user.employeeId : "all"], queryFn: () => attendanceService.weeklyTrend(isSelfService ? user.employeeId ?? user.id : undefined) });
+  const corrections = useQuery({ queryKey: ["corrections"], queryFn: () => attendanceService.corrections(), enabled: !isSelfService });
   const today = useQuery({
-    queryKey: ["attendance-today", user.id],
+    queryKey: ["attendance-today", user.employeeId ?? user.id],
     queryFn: () => attendanceService.today(user.employeeId ?? user.id),
   });
 
   const punch = useMutation({
     mutationFn: (kind: "in" | "out") =>
-      kind === "in" ? attendanceService.checkIn(user.id) : attendanceService.checkOut(user.id),
+      kind === "in" ? attendanceService.checkIn(user.employeeId ?? user.id) : attendanceService.checkOut(user.employeeId ?? user.id),
     onSuccess: (_data, kind) => {
       toast.success(kind === "in" ? "Checked in" : "Checked out", {
         description: "Recorded through the web client.",
       });
-      queryClient.invalidateQueries({ queryKey: ["attendance-today", user.id] });
+      void queryClient.invalidateQueries({ queryKey: ["attendance-today", user.employeeId ?? user.id] });
     },
     onError: (error) => toast.error("Could not record your punch", { description: error instanceof Error ? error.message : "Try again." }),
   });
