@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Building2, Shield, Users } from "lucide-react";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
@@ -10,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
+import { settingsService } from "@/services/settingsService";
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: () => requireAuthForPath("/settings"),
@@ -21,6 +25,47 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPage() {
   const { user, role } = useSession();
+  const queryClient = useQueryClient();
+
+  const organization = useQuery({
+    queryKey: ["organization-settings"],
+    queryFn: () => settingsService.organization(),
+  });
+  const [orgForm, setOrgForm] = useState({ name: "", timezone: "" });
+  useEffect(() => {
+    if (organization.data) setOrgForm(organization.data);
+  }, [organization.data]);
+  const saveOrganization = useMutation({
+    mutationFn: () => settingsService.updateOrganization(orgForm),
+    onSuccess: () => {
+      toast.success("Organisation settings saved");
+      void queryClient.invalidateQueries({ queryKey: ["organization-settings"] });
+    },
+    onError: (e) =>
+      toast.error("Could not save organisation settings", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const notificationPrefs = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () => settingsService.notificationPreferences(),
+  });
+  const [notifForm, setNotifForm] = useState({ leaveApprovals: true, payrollRuns: true });
+  useEffect(() => {
+    if (notificationPrefs.data) setNotifForm(notificationPrefs.data);
+  }, [notificationPrefs.data]);
+  const saveNotifications = useMutation({
+    mutationFn: () => settingsService.updateNotificationPreferences(notifForm),
+    onSuccess: () => {
+      toast.success("Notification settings saved");
+      void queryClient.invalidateQueries({ queryKey: ["notification-preferences"] });
+    },
+    onError: (e) =>
+      toast.error("Could not save notification settings", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
 
   return (
     <AppLayout>
@@ -46,14 +91,27 @@ function SettingsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="company">Company name</Label>
-                <Input id="company" defaultValue="Jeevijay Technologies" />
+                <Input
+                  id="company"
+                  value={orgForm.name}
+                  onChange={(event) => setOrgForm({ ...orgForm, name: event.target.value })}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="timezone">Primary timezone</Label>
-                <Input id="timezone" defaultValue="Asia/Kolkata" />
+                <Input
+                  id="timezone"
+                  value={orgForm.timezone}
+                  onChange={(event) => setOrgForm({ ...orgForm, timezone: event.target.value })}
+                />
               </div>
             </div>
-            <Button disabled>Save organisation settings</Button>
+            <Button
+              onClick={() => saveOrganization.mutate()}
+              disabled={saveOrganization.isPending || organization.isLoading}
+            >
+              {saveOrganization.isPending ? "Saving…" : "Save organisation settings"}
+            </Button>
           </SectionCard>
         </TabsContent>
 
@@ -88,11 +146,23 @@ function SettingsPage() {
             description="Configure which events generate inbox alerts and email digests."
             bodyClassName="space-y-4 p-5"
           >
-            {[
-              { icon: Bell, label: "Leave approvals", description: "Notify when requests need action" },
-              { icon: Building2, label: "Payroll runs", description: "Alerts when payroll is processed" },
-            ].map((item) => (
-              <div key={item.label} className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+            {(
+              [
+                {
+                  key: "leaveApprovals" as const,
+                  icon: Bell,
+                  label: "Leave approvals",
+                  description: "Notify when requests need action",
+                },
+                {
+                  key: "payrollRuns" as const,
+                  icon: Building2,
+                  label: "Payroll runs",
+                  description: "Alerts when payroll is processed",
+                },
+              ]
+            ).map((item) => (
+              <div key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
                 <div className="flex items-start gap-3">
                   <item.icon className="mt-0.5 size-4 text-primary" />
                   <div>
@@ -100,10 +170,18 @@ function SettingsPage() {
                     <p className="text-xs text-muted-foreground">{item.description}</p>
                   </div>
                 </div>
-                <Switch defaultChecked />
+                <Switch
+                  checked={notifForm[item.key]}
+                  onCheckedChange={(checked) => setNotifForm({ ...notifForm, [item.key]: checked })}
+                />
               </div>
             ))}
-            <Button disabled>Save notification settings</Button>
+            <Button
+              onClick={() => saveNotifications.mutate()}
+              disabled={saveNotifications.isPending || notificationPrefs.isLoading}
+            >
+              {saveNotifications.isPending ? "Saving…" : "Save notification settings"}
+            </Button>
           </SectionCard>
         </TabsContent>
       </Tabs>

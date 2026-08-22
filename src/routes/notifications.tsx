@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/State
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { workplaceService } from "@/services/workplaceService";
+import type { NotificationItem } from "@/types";
 
 export const Route = createFileRoute("/notifications")({
   beforeLoad: () => requireAuthForPath("/notifications"),
@@ -59,6 +60,7 @@ function NotificationsPage() {
                     <p className="text-sm font-semibold">{item.title}</p>
                     <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
                     <p className="mt-2 text-xs text-muted-foreground/80">{item.createdAt}</p>
+                    <ComplaintNotificationLink item={item} />
                   </div>
                   <StatusBadge status={item.read ? "Read" : "New"} tone={item.read ? "neutral" : "info"} />
                 </div>
@@ -68,5 +70,19 @@ function NotificationsPage() {
         </SectionCard>
       )}
     </AppLayout>
+  );
+}
+
+function ComplaintNotificationLink({ item }: { item: NotificationItem }) {
+  if (item.referenceType !== "employee_complaint" || !item.referenceId) return null;
+  return (
+    <Link
+      to="/employees/$employeeId"
+      params={{ employeeId: item.referenceId }}
+      search={{ tab: "complaints" }}
+      className="mt-2 inline-block text-xs font-semibold text-primary hover:underline"
+    >
+      Open complaint →
+    </Link>
   );
 }

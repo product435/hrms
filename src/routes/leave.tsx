@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CalendarPlus, Check, ClipboardList, X } from "lucide-react";
@@ -37,6 +37,8 @@ import type { LeaveRequest } from "@/types";
 
 export const Route = createFileRoute("/leave")({
   beforeLoad: () => requireAuthForPath("/leave"),
+  validateSearch: (search: Record<string, unknown>): { status?: string } =>
+    typeof search["status"] === "string" ? { status: search["status"] } : {},
   head: () => ({
     meta: [
       { title: "Leave management · TeamNest" },
@@ -55,29 +57,35 @@ export const Route = createFileRoute("/leave")({
   component: LeavePage,
 });
 
-const LEAVE_TYPES = ["Casual", "Sick", "Earned", "Unpaid", "Comp-off"];
-
 function LeavePage() {
   const { role, user } = useSession();
+  const { status: initialStatus } = Route.useSearch();
   const isSelfService = role === "employee";
   const canDecide = role === "admin" || role === "hr" || role === "manager";
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState(initialStatus ?? "all");
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ type: "Casual", from: "", to: "", reason: "" });
+  const [form, setForm] = useState({ type: "", from: "", to: "", reason: "" });
+  const leaveTypes = useQuery({ queryKey: ["leave-types"], queryFn: () => leaveService.types() });
+  useEffect(() => {
+    const firstType = leaveTypes.data?.[0]?.name;
+    if (!form.type && firstType) setForm((prev) => ({ ...prev, type: firstType }));
+  }, [form.type, leaveTypes.data]);
 
+  // Managers aren't scoped to a fixed employeeId filter here -- RLS
+  // (leave_requests_manager_view_team) already restricts the rows Supabase
+  // returns to the manager's own request plus their direct reports', so the
+  // same list() call as admin/hr correctly shows every status, not just
+  // pending ones.
   const scope = isSelfService ? { employeeId: user.employeeId ?? user.id } : {};
   const requests = useQuery({
     queryKey: ["leave", scope, search, status],
-    queryFn: () =>
-      role === "manager"
-        ? leaveService.pendingApprovals(user.id).then((rows) => rows.filter((row) => (!status || status === "all" || row.status === status) && (!search || `${row.employeeName} ${row.type} ${row.reason}`.toLowerCase().includes(search.toLowerCase()))))
-        : leaveService.list({ ...scope, search, status }),
+    queryFn: () => leaveService.list({ ...scope, search, status }),
   });
   const balance = useQuery({
-    queryKey: ["leave-balance", user.id],
+    queryKey: ["leave-balance", user.employeeId ?? user.id],
     queryFn: () => leaveService.balance(user.employeeId ?? user.id),
   });
 
@@ -86,8 +94,9 @@ function LeavePage() {
     onSuccess: () => {
       toast.success("Leave request submitted", { description: "Your approver has been notified." });
       setOpen(false);
-      setForm({ type: "Casual", from: "", to: "", reason: "" });
+      setForm({ type: leaveTypes.data?.[0]?.name ?? "", from: "", to: "", reason: "" });
       queryClient.invalidateQueries({ queryKey: ["leave"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-balance"] });
     },
     onError: (error) => toast.error("Could not submit the request", { description: error instanceof Error ? error.message : "Try again." }),
   });
@@ -141,8 +150,20 @@ function LeavePage() {
               header: "Decision",
               align: "right" as const,
               className: "pr-5",
-              cell: (row: LeaveRequest) =>
-                row.status === "pending" ? (
+              cell: (row: LeaveRequest) => {
+                // A manager's own request is visible in this list (it's
+                // still their leave), but RLS deliberately blocks deciding
+                // on your own request -- only a direct report's -- so the
+                // action buttons are hidden rather than offering a decision
+                // that will always be rejected server-side.
+                const isOwnRequest = row.employeeId === (user.employeeId ?? user.id);
+                if (row.status !== "pending") {
+                  return <span className="text-xs text-muted-foreground">Closed</span>;
+                }
+                if (isOwnRequest) {
+                  return <span className="text-xs text-muted-foreground">Awaiting approver</span>;
+                }
+                return (
                   <div className="flex justify-end gap-1.5">
                     <Button
                       size="sm"
@@ -161,17 +182,15 @@ function LeavePage() {
                       <X className="size-3.5" /> Reject
                     </Button>
                   </div>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Closed</span>
-                ),
+                );
+              },
             },
           ]
         : []),
     ],
-    [canDecide, decide, isSelfService],
+    [canDecide, decide, isSelfService, user],
   );
 
-  const b = balance.data;
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
 
   return (
@@ -209,9 +228,9 @@ function LeavePage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {LEAVE_TYPES.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {type}
+                      {(leaveTypes.data ?? []).map((type) => (
+                        <SelectItem key={type.id} value={type.name}>
+                          {type.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -264,9 +283,19 @@ function LeavePage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Casual balance" value={String(b?.casual ?? 0)} icon={ClipboardList} tone="info" hint="days left" />
-        <StatCard label="Sick balance" value={String(b?.sick ?? 0)} icon={ClipboardList} tone="accent" hint="days left" />
-        <StatCard label="Earned balance" value={String(b?.earned ?? 0)} icon={ClipboardList} tone="success" hint="days left" />
+        {(balance.data ?? []).map((entry, index) => {
+          const tones = ["info", "accent", "success"] as const;
+          return (
+            <StatCard
+              key={entry.id}
+              label={`${entry.name} balance`}
+              value={String(entry.remaining)}
+              icon={ClipboardList}
+              tone={tones[index % tones.length] ?? "info"}
+              hint={`${entry.used} used of ${entry.allocated}`}
+            />
+          );
+        })}
         <StatCard label="Pending" value={String(pendingCount)} icon={ClipboardList} tone="warning" hint="in current view" />
       </div>
 

@@ -51,7 +51,7 @@ function AssetsPage() {
   const [addOpen, setAddOpen] = useState(false); const [form, setForm] = useState({ code: "", name: "", category: "Laptop", condition: "new", status: "available", serialNumber: "", location: "", purchaseCost: "" });
 
   const assets = useQuery({
-    queryKey: ["assets", isSelfService ? user.name : "all", search, status, category],
+    queryKey: ["assets", isSelfService ? (user.employeeId ?? user.id) : "all", search, status, category],
     queryFn: () =>
       isSelfService
         ? assetService.assignedTo(user.employeeId ?? user.id)

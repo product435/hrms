@@ -724,6 +724,60 @@ export type Database = {
           },
         ]
       }
+      employee_complaints: {
+        Row: {
+          assigned_to: string | null
+          category: string | null
+          created_at: string
+          description: string
+          employee_id: string
+          id: string
+          priority: string
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          category?: string | null
+          created_at?: string
+          description: string
+          employee_id: string
+          id?: string
+          priority?: string
+          status?: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          category?: string | null
+          created_at?: string
+          description?: string
+          employee_id?: string
+          id?: string
+          priority?: string
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "employee_complaints_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "employee_complaints_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       employee_shifts: {
         Row: {
           effective_from: string | null
@@ -765,6 +819,7 @@ export type Database = {
       }
       employees: {
         Row: {
+          blood_group: string | null
           created_at: string | null
           date_of_birth: string | null
           department_id: string | null
@@ -788,6 +843,7 @@ export type Database = {
           work_location: string | null
         }
         Insert: {
+          blood_group?: string | null
           created_at?: string | null
           date_of_birth?: string | null
           department_id?: string | null
@@ -811,6 +867,7 @@ export type Database = {
           work_location?: string | null
         }
         Update: {
+          blood_group?: string | null
           created_at?: string | null
           date_of_birth?: string | null
           department_id?: string | null
@@ -1578,8 +1635,12 @@ export type Database = {
       }
       payroll_records: {
         Row: {
+          allowances: number | null
+          basic: number | null
+          bonus: number | null
           employee_id: string | null
           gross_salary: number | null
+          hra: number | null
           id: string
           net_salary: number | null
           paid_at: string | null
@@ -1590,8 +1651,12 @@ export type Database = {
           total_deductions: number | null
         }
         Insert: {
+          allowances?: number | null
+          basic?: number | null
+          bonus?: number | null
           employee_id?: string | null
           gross_salary?: number | null
+          hra?: number | null
           id?: string
           net_salary?: number | null
           paid_at?: string | null
@@ -1602,8 +1667,12 @@ export type Database = {
           total_deductions?: number | null
         }
         Update: {
+          allowances?: number | null
+          basic?: number | null
+          bonus?: number | null
           employee_id?: string | null
           gross_salary?: number | null
+          hra?: number | null
           id?: string
           net_salary?: number | null
           paid_at?: string | null
@@ -1999,10 +2068,46 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_employee_complaint: {
+        Args: {
+          p_category: string
+          p_description: string
+          p_priority?: string
+          p_subject: string
+        }
+        Returns: {
+          assigned_to: string | null
+          category: string | null
+          created_at: string
+          description: string
+          employee_id: string
+          id: string
+          priority: string
+          status: string
+          subject: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "employee_complaints"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       current_employee_id: { Args: never; Returns: string }
       current_org_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       current_user_role: { Args: never; Returns: string }
+      debug_list_policies: {
+        Args: { target_tables: string[] }
+        Returns: {
+          check_expr: string
+          cmd: string
+          policy_name: string
+          table_name: string
+          using_expr: string
+        }[]
+      }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_hr: { Args: never; Returns: boolean }
       is_manager: { Args: never; Returns: boolean }

@@ -73,7 +73,17 @@ function OrgDashboard() {
   const trend = useQuery({ queryKey: ["attendance-trend"], queryFn: () => insightsService.attendanceTrend() });
   const headcount = useQuery({ queryKey: ["headcount-trend"], queryFn: () => insightsService.headcountTrend() });
   const distribution = useQuery({ queryKey: ["dept-distribution", role, user.employeeId], queryFn: () => insightsService.departmentDistribution(role === "manager" ? user.employeeId : undefined) });
-  const pending = useQuery({ queryKey: ["leave", "pending", role, user.id], queryFn: () => role === "manager" ? leaveService.pendingApprovals(user.id) : leaveService.list({ status: "pending" }) });
+  // RLS returns a manager's own pending request alongside their team's
+  // (leave_requests_self_select OR leave_requests_manager_view_team), but a
+  // manager can never decide on their own request -- only a direct
+  // report's -- so it's excluded from "waiting on you" specifically.
+  const pending = useQuery({
+    queryKey: ["leave", "pending", role, user.id],
+    queryFn: async () => {
+      const rows = role === "manager" ? await leaveService.pendingApprovals() : await leaveService.list({ status: "pending" });
+      return role === "manager" ? rows.filter((r) => r.employeeId !== (user.employeeId ?? user.id)) : rows;
+    },
+  });
   const openings = useQuery({ queryKey: ["openings", "open"], queryFn: () => talentService.openings({ status: "open" }) });
   const announcements = useQuery({ queryKey: ["announcements"], queryFn: () => workplaceService.announcements() });
 
@@ -91,7 +101,9 @@ function OrgDashboard() {
               <Link to="/reports">View reports</Link>
             </Button>
             <Button asChild>
-              <Link to="/leave">Review approvals</Link>
+              <Link to="/leave" search={{ status: "pending" }}>
+                Review approvals
+              </Link>
             </Button>
           </>
         }
@@ -307,12 +319,16 @@ function EmployeeDashboard() {
     queryFn: () => leaveService.list({ employeeId: user.employeeId ?? user.id }),
   });
   const myGoals = useQuery({
-    queryKey: ["goals", user.name],
+    queryKey: ["goals", user.employeeId ?? user.id],
     queryFn: () => talentService.goalsOf(user.employeeId ?? user.id),
   });
   const myAssets = useQuery({
-    queryKey: ["assets", user.name],
+    queryKey: ["assets", user.employeeId ?? user.id],
     queryFn: () => assetService.assignedTo(user.employeeId ?? user.id),
+  });
+  const myBalance = useQuery({
+    queryKey: ["leave-balance", user.employeeId ?? user.id],
+    queryFn: () => leaveService.balance(user.employeeId ?? user.id),
   });
   const payslips = useQuery({
     queryKey: ["payslips", user.id],
@@ -351,10 +367,10 @@ function EmployeeDashboard() {
         />
         <StatCard
           label="Leave balance"
-          value="—"
+          value={myBalance.data ? String(myBalance.data.reduce((sum, entry) => sum + entry.remaining, 0)) : "—"}
           icon={ClipboardList}
           tone="info"
-          hint="Balance ledger unavailable"
+          hint={myBalance.data?.length ? myBalance.data.map((entry) => `${entry.name.replace(/ Leave$/i, "")} ${entry.remaining}`).join(" · ") : "No leave types configured"}
         />
         <StatCard
           label="Last net pay"

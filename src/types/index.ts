@@ -233,7 +233,7 @@ export interface PerformanceReview {
   selfScore: number;
   managerScore: number;
   finalRating: number;
-  status: "not-started" | "in-progress" | "submitted" | "closed";
+  status: "not-started" | "in-progress" | "submitted" | "closed" | "completed";
 }
 
 export interface DocumentItem {
@@ -285,6 +285,29 @@ export interface NotificationItem {
   type: "leave" | "payroll" | "asset" | "attendance" | "system";
   createdAt: string;
   read: boolean;
+  // For an "employee_complaint" notification this is the complaining
+  // employee's id, so the notification can link straight to their profile's
+  // Complaints tab -- there's no separate single-complaint detail page.
+  referenceId?: string;
+  referenceType?: string;
+}
+
+export type ComplaintPriority = "low" | "medium" | "high" | "urgent";
+export type ComplaintStatus = "open" | "in-progress" | "resolved" | "closed";
+
+export interface Complaint {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  subject: string;
+  category: string;
+  description: string;
+  priority: ComplaintPriority;
+  status: ComplaintStatus;
+  assignedTo: string | null;
+  assignedToName: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface AuditEntry {

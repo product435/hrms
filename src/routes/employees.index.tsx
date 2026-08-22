@@ -43,22 +43,23 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [status, setStatus] = useState("all");
-  const { role, user } = useSession();
+  const { role, user, isLoading } = useSession();
   const [addOpen, setAddOpen] = useState(false);
-  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" });
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "", bloodGroup: "" });
   const queryClient = useQueryClient();
 
   const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
   const employees = useQuery({
-    queryKey: ["employees", search, department, status],
+    queryKey: ["employees", role, search, department, status],
     queryFn: () => role === "manager" && user.employeeId ? employeeService.teamOf(user.employeeId) : employeeService.list({ search, department, status }),
+    enabled: !isLoading,
   });
   const addEmployee = useMutation({
     mutationFn: () => {
       if (!form.firstName || !form.lastName || !form.email || !form.employeeCode || !form.joiningDate) throw new Error("First name, last name, email, employee code and joining date are required.");
       return employeeService.create(role === "manager" && user.employeeId ? { ...form, managerId: user.employeeId } : form);
     },
-    onSuccess: () => { toast.success("Employee added"); setAddOpen(false); setForm({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "" }); void queryClient.invalidateQueries({ queryKey: ["employees"] }); },
+    onSuccess: () => { toast.success("Employee added"); setAddOpen(false); setForm({ firstName: "", lastName: "", email: "", employeeCode: "", joiningDate: "", employmentType: "full-time", departmentId: "", bloodGroup: "" }); void queryClient.invalidateQueries({ queryKey: ["employees"] }); },
     onError: (e) => toast.error("Could not add employee", { description: e instanceof Error ? e.message : "Supabase request failed." }),
   });
   const exportEmployees = () => {
@@ -152,7 +153,7 @@ function EmployeesPage() {
                 onChange: setDepartment,
                 options: [
                   { value: "all", label: "All departments" },
-                  ...(departments.data ?? []).map((d) => ({ value: d.name, label: d.name })),
+                  ...[...new Set((departments.data ?? []).map((d) => d.name))].map((name) => ({ value: name, label: name })),
                 ],
               },
               {
@@ -176,7 +177,7 @@ function EmployeesPage() {
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent><DialogHeader><DialogTitle>Add employee</DialogTitle></DialogHeader>
           <div className="grid gap-3 sm:grid-cols-2">
-            {([['firstName','First name'],['lastName','Last name'],['email','Email'],['employeeCode','Employee code'],['joiningDate','Joining date']] as const).map(([key,label]) => <div key={key} className="space-y-1"><Label>{label}</Label><Input type={key === 'joiningDate' ? 'date' : key === 'email' ? 'email' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}
+            {([['firstName','First name'],['lastName','Last name'],['email','Email'],['employeeCode','Employee code'],['joiningDate','Joining date'],['bloodGroup','Blood group']] as const).map(([key,label]) => <div key={key} className="space-y-1"><Label>{label}</Label><Input type={key === 'joiningDate' ? 'date' : key === 'email' ? 'email' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}
             <div className="space-y-1"><Label>Department</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}><option value="">Unassigned</option>{(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={() => addEmployee.mutate()} disabled={addEmployee.isPending}>{addEmployee.isPending ? "Saving…" : "Save employee"}</Button></DialogFooter>

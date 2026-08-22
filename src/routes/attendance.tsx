@@ -124,11 +124,14 @@ function AttendancePage() {
             <Button
               variant="outline"
               onClick={() => punch.mutate("in")}
-              disabled={punch.isPending}
+              disabled={punch.isPending || Boolean(today.data?.checkIn)}
             >
               <LogIn className="size-4" /> Check in
             </Button>
-            <Button onClick={() => punch.mutate("out")} disabled={punch.isPending}>
+            <Button
+              onClick={() => punch.mutate("out")}
+              disabled={punch.isPending || !today.data?.checkIn || Boolean(today.data?.checkOut)}
+            >
               <LogOut className="size-4" /> Check out
             </Button>
           </>

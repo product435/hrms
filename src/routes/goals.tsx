@@ -37,15 +37,11 @@ function GoalsPage() {
   const [open, setOpen] = useState(false); const [form, setForm] = useState({ title: "", dueDate: "", weight: "" }); const queryClient = useQueryClient();
 
   const goals = useQuery({
-    queryKey: ["goals", isSelfService ? user?.name : "all", search, status],
+    queryKey: ["goals", isSelfService ? (user.employeeId ?? user.id) : "all", search, status],
     queryFn: () =>
       isSelfService
         ? talentService.goalsOf(user.employeeId ?? user.id)
-        : talentService.goals(
-            role === "manager" && user.employeeId
-              ? { search, status, managerId: user.employeeId }
-              : { search, status },
-          ),
+        : talentService.goals({ search, status }),
     enabled: !isLoading,
   });
   const addGoal = useMutation({ mutationFn: () => { if (!(role === "manager" || role === "employee") || !user.employeeId) throw new Error("Your employee profile is not linked."); if (!form.title.trim()) throw new Error("Goal title is required."); return talentService.createGoal({ employeeId: user.employeeId, title: form.title, category: "Business", dueDate: form.dueDate, weight: Number(form.weight) || 0 }); }, onSuccess: () => { toast.success("Goal added"); setOpen(false); setForm({ title: "", dueDate: "", weight: "" }); void queryClient.invalidateQueries({ queryKey: ["goals"] }); }, onError: (e) => toast.error("Could not add goal", { description: e instanceof Error ? e.message : "Supabase request failed." }) });

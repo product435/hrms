@@ -32,7 +32,7 @@ function mapEmployee(row: any): Employee {
     shift: row.shifts?.name ?? "",
     gender: row.gender ?? "",
     dateOfBirth: row.date_of_birth ?? "",
-    bloodGroup: "",
+    bloodGroup: row.blood_group ?? "",
     maritalStatus: row.marital_status ?? "",
     address: primaryAddress
       ? [primaryAddress.address_line1, primaryAddress.city, primaryAddress.state, primaryAddress.postal_code]
@@ -67,6 +67,7 @@ export const employeeService = {
     employmentType: string;
     joiningDate: string;
     managerId?: string;
+    bloodGroup?: string;
   }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const organizationId = await requireOrganizationId();
@@ -84,11 +85,49 @@ export const employeeService = {
         employment_status: "active",
         joining_date: input.joiningDate,
         manager_id: input.managerId || null,
+        blood_group: input.bloodGroup?.trim() || null,
       })
       .select("id")
       .single();
     if (error) throw error;
     return data;
+  },
+  async update(
+    id: string,
+    input: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      gender?: string;
+      dateOfBirth?: string;
+      bloodGroup?: string;
+      maritalStatus?: string;
+      workLocation?: string;
+      departmentId?: string;
+      designationId?: string;
+      employmentType?: string;
+      status?: string;
+    },
+  ) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase
+      .from("employees")
+      .update({
+        ...(input.firstName !== undefined ? { first_name: input.firstName.trim() } : {}),
+        ...(input.lastName !== undefined ? { last_name: input.lastName.trim() } : {}),
+        ...(input.phone !== undefined ? { phone: input.phone.trim() || null } : {}),
+        ...(input.gender !== undefined ? { gender: input.gender || null } : {}),
+        ...(input.dateOfBirth !== undefined ? { date_of_birth: input.dateOfBirth || null } : {}),
+        ...(input.bloodGroup !== undefined ? { blood_group: input.bloodGroup.trim() || null } : {}),
+        ...(input.maritalStatus !== undefined ? { marital_status: input.maritalStatus || null } : {}),
+        ...(input.workLocation !== undefined ? { work_location: input.workLocation.trim() || null } : {}),
+        ...(input.departmentId !== undefined ? { department_id: input.departmentId || null } : {}),
+        ...(input.designationId !== undefined ? { designation_id: input.designationId || null } : {}),
+        ...(input.employmentType !== undefined ? { employment_type: input.employmentType } : {}),
+        ...(input.status !== undefined ? { employment_status: input.status } : {}),
+      })
+      .eq("id", id);
+    if (error) throw error;
   },
   async list(options: QueryOptions = {}): Promise<Employee[]> {
     if (!isSupabaseConfigured || !supabase)

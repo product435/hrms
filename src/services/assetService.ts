@@ -104,37 +104,63 @@ export const assetService = {
   async history(tag?: string, employeeId?: string): Promise<AssetEvent[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(tag ? fixtureEvents.filter((e) => e.assetTag === tag) : fixtureEvents);
-    let query = supabase.from("asset_repairs").select("*, assets(asset_code)");
-    if (tag) query = query.eq("assets.asset_code", tag);
+    // Repairs and assignments/returns live in separate tables; a filter on
+    // an embedded resource (e.g. `.eq("assets.asset_code", tag)`) only
+    // trims the embed, it doesn't exclude the parent row, so both queries
+    // are fetched unfiltered by tag and narrowed client-side instead.
+    let assignmentsQuery = supabase
+      .from("asset_assignments")
+      .select("*, assets(asset_code), employees(first_name,last_name)");
+    let repairsQuery = supabase.from("asset_repairs").select("*, assets(asset_code)");
     if (employeeId) {
+      assignmentsQuery = assignmentsQuery.eq("employee_id", employeeId);
       const assignments = await supabase.from("asset_assignments").select("asset_id").eq("employee_id", employeeId);
       if (assignments.error) throw assignments.error;
       const ids = (assignments.data ?? []).map((row) => row.asset_id).filter(Boolean);
       if (!ids.length) return [];
-      query = query.in("asset_id", ids as string[]);
+      repairsQuery = repairsQuery.in("asset_id", ids as string[]);
     }
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data ?? [])
-      .map((r: any) => ({
-        id: r.id,
-        assetTag: r.assets?.asset_code ?? "",
-        type: "repair" as const,
-        actor: "",
-        date: r.sent_at ?? "",
-        note: r.remarks ?? r.issue ?? "",
-      }))
-      .filter((e) => !tag || e.assetTag === tag);
+    const [assignments, repairs] = await Promise.all([assignmentsQuery, repairsQuery]);
+    if (assignments.error) throw assignments.error;
+    if (repairs.error) throw repairs.error;
+    const assignmentEvents: AssetEvent[] = (assignments.data ?? []).flatMap((r: any) => {
+      const holder = r.employees ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim() : "";
+      const events: AssetEvent[] = [
+        {
+          id: `${r.id}-assigned`,
+          assetTag: r.assets?.asset_code ?? "",
+          type: "assigned" as const,
+          actor: "",
+          date: r.assigned_at ?? "",
+          note: holder ? `Assigned to ${holder}` : "Assigned",
+        },
+      ];
+      if (r.returned_at) {
+        events.push({
+          id: `${r.id}-returned`,
+          assetTag: r.assets?.asset_code ?? "",
+          type: "returned" as const,
+          actor: "",
+          date: r.returned_at,
+          note: holder ? `Returned by ${holder}` : "Returned",
+        });
+      }
+      return events;
+    });
+    const repairEvents: AssetEvent[] = (repairs.data ?? []).map((r: any) => ({
+      id: r.id,
+      assetTag: r.assets?.asset_code ?? "",
+      type: "repair" as const,
+      actor: "",
+      date: r.sent_at ?? "",
+      note: r.remarks ?? r.issue ?? "",
+    }));
+    return [...assignmentEvents, ...repairEvents]
+      .filter((e) => !tag || e.assetTag === tag)
+      .sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
   },
-  async assign(tag: string, employeeName: string) {
-    if (!isSupabaseConfigured || !supabase) return fromFixture({ tag, employeeName });
-    const { data: employee, error: employeeError } = await supabase
-      .from("employees")
-      .select("id")
-      .or(`email.eq.${employeeName},first_name.eq.${employeeName.split(" ")[0]}`)
-      .maybeSingle();
-    if (employeeError) throw employeeError;
-    if (!employee?.id) throw new Error("The selected employee could not be found.");
+  async assign(tag: string, employeeId: string) {
+    if (!isSupabaseConfigured || !supabase) return fromFixture({ tag, employeeId });
     const { data: asset, error: assetError } = await supabase
       .from("assets")
       .select("id")
@@ -143,7 +169,7 @@ export const assetService = {
     if (assetError) throw assetError;
     const { data, error } = await supabase
       .from("asset_assignments")
-      .insert({ asset_id: asset.id, employee_id: employee.id })
+      .insert({ asset_id: asset.id, employee_id: employeeId })
       .select()
       .single();
     if (error) throw error;

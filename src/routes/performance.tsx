@@ -25,11 +25,11 @@ function PerformancePage() {
   const { role, user } = useSession();
   const reviews = useQuery({
     queryKey: ["performance-reviews", role, user.employeeId],
-    queryFn: () => talentService.reviews(role === "manager" ? user.employeeId : undefined),
+    queryFn: () => talentService.reviews(),
   });
 
   const inProgress = (reviews.data ?? []).filter((row) => row.status === "in-progress").length;
-  const closed = (reviews.data ?? []).filter((row) => row.status === "closed").length;
+  const closed = (reviews.data ?? []).filter((row) => row.status === "closed" || row.status === "completed").length;
 
   const columns = useMemo<Column<PerformanceReview>[]>(
     () => [
@@ -81,7 +81,7 @@ function PerformancePage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Active cycles" value={String((reviews.data ?? []).length)} icon={ChartBar} />
         <StatCard label="In progress" value={String(inProgress)} tone="info" />
-        <StatCard label="Closed" value={String(closed)} tone="success" />
+        <StatCard label="Completed" value={String(closed)} tone="success" />
       </div>
 
       {reviews.isLoading ? (

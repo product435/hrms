@@ -24,9 +24,12 @@ const mapJob = (r: any): JobOpening => ({
 });
 // candidates has no per-application stage/role; those live on job_applications
 // (one candidate can apply to several jobs), so this reads the candidate's
-// most recent application.
+// most recent application by applied_at.
 const mapCandidate = (r: any): Candidate => {
-  const application = r.job_applications?.[0];
+  const applications = [...(r.job_applications ?? [])].sort(
+    (a: any, b: any) => new Date(b.applied_at ?? 0).getTime() - new Date(a.applied_at ?? 0).getTime(),
+  );
+  const application = applications[0];
   return {
     id: r.id,
     name: r.name,
@@ -118,16 +121,21 @@ export const talentService = {
             (!options.status || options.status === "all" || c.stage === options.status),
         ),
       );
-    let query = supabase
+    // Filtering by stage can't be pushed onto the `job_applications` embed
+    // here: PostgREST only turns an embed filter into a row-excluding INNER
+    // JOIN with `!inner`, and a candidate can have several applications at
+    // different stages. So every candidate is fetched with all of its
+    // applications, the current stage is computed client-side from the most
+    // recent one, and the stage filter is then applied to that computed
+    // value -- never to the raw (and possibly non-matching) first embed row.
+    const { data, error } = await supabase
       .from("candidates")
       .select("*, job_applications(stage, applied_at, job_openings(title))")
       .order("id", { ascending: false });
-    if (options.status && options.status !== "all")
-      query = query.eq("job_applications.stage", options.status);
-    const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
       .map(mapCandidate)
+      .filter((c) => !options.status || options.status === "all" || c.stage === options.status)
       .filter((c) => matchesSearch([c.name, c.role, c.source], options.search));
   },
   // The schema has no "buddy" or numeric progress column for onboarding;
@@ -160,7 +168,11 @@ export const talentService = {
       };
     });
   },
-  async goals(options: QueryOptions & { managerId?: string } = {}): Promise<Goal[]> {
+  // No manager-id filter here: RLS (goals_self_select OR
+  // goals_manager_view_team) already returns exactly the caller's own goals
+  // plus their direct reports' -- filtering client-side by manager_id would
+  // additionally exclude the caller's own goals from their own team view.
+  async goals(options: QueryOptions = {}): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
         fixtureGoals.filter(
@@ -174,7 +186,6 @@ export const talentService = {
       .select("*, employees!inner(first_name,last_name,manager_id)")
       .order("due_date");
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
-    if (options.managerId) query = query.eq("employees.manager_id", options.managerId);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
@@ -205,14 +216,14 @@ export const talentService = {
     if (error) throw error;
     return (data ?? []).map(mapGoal);
   },
-  async reviews(managerId?: string): Promise<PerformanceReview[]> {
+  // Same reasoning as goals(): RLS already unions "my own reviews" with "my
+  // direct reports'" for a manager, so no client-side manager_id filter.
+  async reviews(): Promise<PerformanceReview[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureReviews);
-    let query = supabase
+    const { data, error } = await supabase
       .from("performance_reviews")
       .select("*, employees!inner(first_name,last_name,manager_id), reviewer:reviewer_id(full_name)")
       .order("reviewed_at", { ascending: false });
-    if (managerId) query = query.eq("employees.manager_id", managerId);
-    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []).map(mapReview);
   },

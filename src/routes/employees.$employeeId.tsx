@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Mail, MapPin, Phone } from "lucide-react";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuth } from "@/lib/auth-guard";
 import { useSession } from "@/hooks/useSession";
@@ -10,6 +12,23 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/States";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { employeeService } from "@/services/employeeService";
 import { assetService } from "@/services/assetService";
@@ -17,7 +36,11 @@ import { attendanceService } from "@/services/attendanceService";
 import { leaveService } from "@/services/leaveService";
 import { talentService } from "@/services/talentService";
 import { workplaceService } from "@/services/workplaceService";
+import { complaintsService } from "@/services/complaintsService";
 import { dayMonth, initialsOf, inr, percent, shortDate } from "@/lib/format";
+import type { ComplaintPriority, ComplaintStatus } from "@/types";
+
+const COMPLAINT_STATUSES: ComplaintStatus[] = ["open", "in-progress", "resolved", "closed"];
 
 export const Route = createFileRoute("/employees/$employeeId")({
   beforeLoad: async ({ params }) => {
@@ -29,6 +52,8 @@ export const Route = createFileRoute("/employees/$employeeId")({
       throw redirect({ to: "/unauthorized" });
     }
   },
+  validateSearch: (search: Record<string, unknown>): { tab?: string } =>
+    typeof search["tab"] === "string" ? { tab: search["tab"] } : {},
   head: () => ({
     meta: [
       { title: "Employee profile · TeamNest" },
@@ -60,13 +85,95 @@ function Field({ label, value }: { label: string; value: string }) {
 
 function EmployeeDetailPage() {
   const { employeeId } = Route.useParams();
-  const { role } = useSession();
+  const { tab: initialTab } = Route.useSearch();
+  const { role, user } = useSession();
+  const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState(initialTab ?? "personal");
   const employee = useQuery({
     queryKey: ["employee", employeeId],
     queryFn: () => employeeService.getById(employeeId),
   });
   const emp = employee.data;
   const fullName = emp ? `${emp.firstName} ${emp.lastName}` : "";
+  const canManage = role === "admin" || role === "hr" || role === "manager";
+  const isOwnProfile = employeeId === (user.employeeId ?? user.id);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    firstName: "",
+    lastName: "",
+    phone: "",
+    gender: "",
+    dateOfBirth: "",
+    bloodGroup: "",
+    maritalStatus: "",
+    workLocation: "",
+    employmentType: "full-time",
+    status: "active",
+  });
+  const openEdit = () => {
+    if (!emp) return;
+    setEditForm({
+      firstName: emp.firstName,
+      lastName: emp.lastName,
+      phone: emp.phone,
+      gender: emp.gender,
+      dateOfBirth: emp.dateOfBirth,
+      bloodGroup: emp.bloodGroup,
+      maritalStatus: emp.maritalStatus,
+      workLocation: emp.location,
+      employmentType: emp.employmentType,
+      status: emp.status,
+    });
+    setEditOpen(true);
+  };
+  const updateEmployee = useMutation({
+    mutationFn: () => employeeService.update(employeeId, editForm),
+    onSuccess: () => {
+      toast.success("Profile updated");
+      setEditOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["employee", employeeId] });
+      void queryClient.invalidateQueries({ queryKey: ["employees"] });
+    },
+    onError: (e) =>
+      toast.error("Could not update profile", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionForm, setCorrectionForm] = useState({
+    attendanceId: "",
+    requestedCheckIn: "",
+    requestedCheckOut: "",
+    reason: "",
+  });
+  const requestCorrection = useMutation({
+    mutationFn: () => {
+      const targetDate = attendance.data?.find((r) => r.id === correctionForm.attendanceId)?.date;
+      return attendanceService.requestCorrection({
+        employeeId,
+        attendanceId: correctionForm.attendanceId,
+        reason: correctionForm.reason,
+        ...(correctionForm.requestedCheckIn
+          ? { requestedCheckIn: `${targetDate}T${correctionForm.requestedCheckIn}:00` }
+          : {}),
+        ...(correctionForm.requestedCheckOut
+          ? { requestedCheckOut: `${targetDate}T${correctionForm.requestedCheckOut}:00` }
+          : {}),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Correction request submitted");
+      setCorrectionOpen(false);
+      setCorrectionForm({ attendanceId: "", requestedCheckIn: "", requestedCheckOut: "", reason: "" });
+      void queryClient.invalidateQueries({ queryKey: ["corrections"] });
+    },
+    onError: (e) =>
+      toast.error("Could not submit correction", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
 
   const attendance = useQuery({
     queryKey: ["attendance", employeeId],
@@ -78,25 +185,93 @@ function EmployeeDetailPage() {
     queryFn: () => leaveService.list({ employeeId }),
     enabled: Boolean(emp),
   });
+  const leaveBalance = useQuery({
+    queryKey: ["leave-balance", employeeId],
+    queryFn: () => leaveService.balance(employeeId),
+    enabled: Boolean(emp),
+  });
   const assets = useQuery({
-    queryKey: ["assets", fullName],
+    queryKey: ["assets", employeeId],
     queryFn: () => assetService.assignedTo(employeeId),
     enabled: Boolean(emp),
   });
   const documents = useQuery({
-    queryKey: ["documents", fullName],
+    queryKey: ["documents", employeeId],
     queryFn: () => workplaceService.documentsOf(employeeId),
     enabled: Boolean(emp),
   });
   const goals = useQuery({
-    queryKey: ["goals", fullName],
+    queryKey: ["goals", employeeId],
     queryFn: () => talentService.goalsOf(employeeId),
     enabled: Boolean(emp),
   });
   const reviews = useQuery({
-    queryKey: ["reviews", fullName],
+    queryKey: ["reviews", employeeId],
     queryFn: () => talentService.reviewsOf(employeeId),
     enabled: Boolean(emp),
+  });
+
+  // Only admin/hr can view or manage another employee's complaints (RLS
+  // enforces this regardless); a manager only ever sees this list on their
+  // own profile, via the self-select policy, same as an employee.
+  const canManageComplaints = role === "admin" || role === "hr";
+  const complaints = useQuery({
+    queryKey: ["complaints", employeeId],
+    queryFn: () => complaintsService.listForEmployee(employeeId),
+    enabled: Boolean(emp) && (isOwnProfile || canManageComplaints),
+  });
+
+  const [complaintOpen, setComplaintOpen] = useState(false);
+  const [complaintForm, setComplaintForm] = useState<{
+    subject: string;
+    category: string;
+    description: string;
+    priority: ComplaintPriority;
+  }>({ subject: "", category: "", description: "", priority: "medium" });
+  const raiseComplaint = useMutation({
+    mutationFn: () => complaintsService.create(complaintForm),
+    onSuccess: () => {
+      toast.success("Complaint submitted", { description: "HR and admin have been notified." });
+      setComplaintOpen(false);
+      setComplaintForm({ subject: "", category: "", description: "", priority: "medium" });
+      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+    },
+    onError: (e) =>
+      toast.error("Could not submit complaint", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const updateComplaintStatus = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: ComplaintStatus }) =>
+      complaintsService.updateStatus(id, status),
+    onSuccess: () => {
+      toast.success("Complaint status updated");
+      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+    },
+    onError: (e) =>
+      toast.error("Could not update status", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const updateComplaintAssignee = useMutation({
+    mutationFn: ({ id, assignedTo }: { id: string; assignedTo: string | null }) =>
+      complaintsService.updateAssignee(id, assignedTo),
+    onSuccess: () => {
+      toast.success("Complaint assignment updated");
+      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+    },
+    onError: (e) =>
+      toast.error("Could not update assignment", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const assignableEmployees = useQuery({
+    queryKey: ["employees", "assignable"],
+    queryFn: () => employeeService.list(),
+    enabled: canManageComplaints,
   });
 
   if (employee.isLoading) {
@@ -138,7 +313,11 @@ function EmployeeDetailPage() {
         actions={
           <>
             <StatusBadge status={emp.status} />
-            <Button variant="outline">Edit profile</Button>
+            {canManage ? (
+              <Button variant="outline" onClick={openEdit}>
+                Edit profile
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -173,7 +352,7 @@ function EmployeeDetailPage() {
           </div>
         </SectionCard>
 
-        <Tabs defaultValue="personal" className="min-w-0">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0">
           <TabsList className="flex w-full flex-wrap justify-start">
             <TabsTrigger value="personal">Personal</TabsTrigger>
             <TabsTrigger value="employment">Employment</TabsTrigger>
@@ -182,6 +361,7 @@ function EmployeeDetailPage() {
             <TabsTrigger value="assets">Assets</TabsTrigger>
             <TabsTrigger value="documents">Documents</TabsTrigger>
             <TabsTrigger value="performance">Performance</TabsTrigger>
+            <TabsTrigger value="complaints">Complaints</TabsTrigger>
           </TabsList>
 
           <TabsContent value="personal" className="mt-4">
@@ -212,7 +392,30 @@ function EmployeeDetailPage() {
           </TabsContent>
 
           <TabsContent value="attendance" className="mt-4">
-            <SectionCard title="Recent attendance" bodyClassName="p-0">
+            <SectionCard
+              title="Recent attendance"
+              bodyClassName="p-0"
+              action={
+                canManage || isOwnProfile ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!attendance.data?.length}
+                    onClick={() => {
+                      setCorrectionForm({
+                        attendanceId: attendance.data?.[0]?.id ?? "",
+                        requestedCheckIn: "",
+                        requestedCheckOut: "",
+                        reason: "",
+                      });
+                      setCorrectionOpen(true);
+                    }}
+                  >
+                    Request correction
+                  </Button>
+                ) : null
+              }
+            >
               <ul className="divide-y divide-border">
                 {(attendance.data ?? []).map((record) => (
                   <li key={record.id} className="flex items-center gap-3 px-5 py-3.5">
@@ -237,17 +440,11 @@ function EmployeeDetailPage() {
 
           <TabsContent value="leave" className="mt-4 space-y-4">
             <div className="grid gap-3 sm:grid-cols-4">
-              {(
-                [
-                  ["Casual", emp.leaveBalance.casual],
-                  ["Sick", emp.leaveBalance.sick],
-                  ["Earned", emp.leaveBalance.earned],
-                  ["Unpaid", emp.leaveBalance.unpaid],
-                ] as const
-              ).map(([label, value]) => (
-                <div key={label} className="surface-card p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-                  <p className="mt-1 font-display text-2xl font-bold">{value}</p>
+              {(leaveBalance.data ?? []).map((entry) => (
+                <div key={entry.id} className="surface-card p-4">
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{entry.name}</p>
+                  <p className="mt-1 font-display text-2xl font-bold">{entry.remaining}</p>
+                  <p className="text-xs text-muted-foreground">{entry.used} used of {entry.allocated}</p>
                 </div>
               ))}
             </div>
@@ -361,8 +558,310 @@ function EmployeeDetailPage() {
               </ul>
             </SectionCard>
           </TabsContent>
+
+          <TabsContent value="complaints" className="mt-4">
+            <SectionCard
+              title="Complaints"
+              description={
+                canManageComplaints
+                  ? "Raised complaints for this employee, within your organization."
+                  : "Complaints you've raised and their current status."
+              }
+              bodyClassName="p-0"
+              action={
+                isOwnProfile ? (
+                  <Button size="sm" onClick={() => setComplaintOpen(true)}>
+                    Raise complaint
+                  </Button>
+                ) : undefined
+              }
+            >
+              <ul className="divide-y divide-border">
+                {(complaints.data ?? []).map((complaint) => (
+                  <li key={complaint.id} className="flex flex-col gap-3 px-5 py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">{complaint.subject}</p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {complaint.category || "Uncategorized"} · {complaint.priority} priority · raised{" "}
+                          {shortDate(complaint.createdAt)}
+                        </p>
+                        {complaint.description ? (
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
+                            {complaint.description}
+                          </p>
+                        ) : null}
+                      </div>
+                      <StatusBadge status={complaint.status} />
+                    </div>
+                    {canManageComplaints ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs text-muted-foreground">Status</Label>
+                          <Select
+                            value={complaint.status}
+                            onValueChange={(value) =>
+                              updateComplaintStatus.mutate({ id: complaint.id, status: value as ComplaintStatus })
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-[140px] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {COMPLAINT_STATUSES.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {status}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-xs text-muted-foreground">Assigned to</Label>
+                          <Select
+                            value={complaint.assignedTo ?? "unassigned"}
+                            onValueChange={(value) =>
+                              updateComplaintAssignee.mutate({
+                                id: complaint.id,
+                                assignedTo: value === "unassigned" ? null : value,
+                              })
+                            }
+                          >
+                            <SelectTrigger className="h-8 w-[180px] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                              {(assignableEmployees.data ?? []).map((e) => (
+                                <SelectItem key={e.id} value={e.id}>
+                                  {e.firstName} {e.lastName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+                {complaints.data?.length === 0 ? (
+                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                    No complaints raised.
+                  </li>
+                ) : null}
+                {!isOwnProfile && !canManageComplaints ? (
+                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                    You don't have access to manage complaints.
+                  </li>
+                ) : null}
+              </ul>
+            </SectionCard>
+          </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit profile</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                ["firstName", "First name", "text"],
+                ["lastName", "Last name", "text"],
+                ["phone", "Phone", "text"],
+                ["gender", "Gender", "text"],
+                ["dateOfBirth", "Date of birth", "date"],
+                ["bloodGroup", "Blood group", "text"],
+                ["maritalStatus", "Marital status", "text"],
+                ["workLocation", "Location", "text"],
+              ] as const
+            ).map(([key, label, type]) => (
+              <div key={key} className="space-y-1">
+                <Label>{label}</Label>
+                <Input
+                  type={type}
+                  value={editForm[key]}
+                  onChange={(event) => setEditForm({ ...editForm, [key]: event.target.value })}
+                />
+              </div>
+            ))}
+            <div className="space-y-1">
+              <Label>Employment type</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={editForm.employmentType}
+                onChange={(event) => setEditForm({ ...editForm, employmentType: event.target.value })}
+              >
+                <option value="full-time">Full-time</option>
+                <option value="part-time">Part-time</option>
+                <option value="contract">Contract</option>
+                <option value="intern">Intern</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>Status</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={editForm.status}
+                onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}
+              >
+                <option value="active">Active</option>
+                <option value="probation">Probation</option>
+                <option value="notice">Notice period</option>
+                <option value="on-leave">On leave</option>
+                <option value="resigned">Resigned</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => updateEmployee.mutate()} disabled={updateEmployee.isPending}>
+              {updateEmployee.isPending ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request attendance correction</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label>Attendance record</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={correctionForm.attendanceId}
+                onChange={(event) =>
+                  setCorrectionForm({ ...correctionForm, attendanceId: event.target.value })
+                }
+              >
+                {(attendance.data ?? []).map((record) => (
+                  <option key={record.id} value={record.id}>
+                    {shortDate(record.date)} · in {record.checkIn ?? "—"} · out {record.checkOut ?? "—"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label>Requested check-in</Label>
+                <Input
+                  type="time"
+                  value={correctionForm.requestedCheckIn}
+                  onChange={(event) =>
+                    setCorrectionForm({ ...correctionForm, requestedCheckIn: event.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Requested check-out</Label>
+                <Input
+                  type="time"
+                  value={correctionForm.requestedCheckOut}
+                  onChange={(event) =>
+                    setCorrectionForm({ ...correctionForm, requestedCheckOut: event.target.value })
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Reason</Label>
+              <Textarea
+                value={correctionForm.reason}
+                placeholder="Explain what needs correcting"
+                onChange={(event) => setCorrectionForm({ ...correctionForm, reason: event.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCorrectionOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => requestCorrection.mutate()}
+              disabled={
+                requestCorrection.isPending ||
+                !correctionForm.attendanceId ||
+                !correctionForm.reason.trim() ||
+                (!correctionForm.requestedCheckIn && !correctionForm.requestedCheckOut)
+              }
+            >
+              {requestCorrection.isPending ? "Submitting…" : "Submit request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={complaintOpen} onOpenChange={setComplaintOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raise a complaint</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label>Subject</Label>
+              <Input
+                value={complaintForm.subject}
+                onChange={(event) => setComplaintForm({ ...complaintForm, subject: event.target.value })}
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label>Category</Label>
+                <Input
+                  placeholder="e.g. Workplace, Payroll, Harassment"
+                  value={complaintForm.category}
+                  onChange={(event) => setComplaintForm({ ...complaintForm, category: event.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Priority</Label>
+                <Select
+                  value={complaintForm.priority}
+                  onValueChange={(value) =>
+                    setComplaintForm({ ...complaintForm, priority: value as ComplaintPriority })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea
+                value={complaintForm.description}
+                placeholder="Describe the issue in detail"
+                onChange={(event) => setComplaintForm({ ...complaintForm, description: event.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setComplaintOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => raiseComplaint.mutate()}
+              disabled={raiseComplaint.isPending || !complaintForm.subject.trim() || !complaintForm.description.trim()}
+            >
+              {raiseComplaint.isPending ? "Submitting…" : "Submit"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

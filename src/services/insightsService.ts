@@ -108,6 +108,7 @@ export const insightsService = {
     const { data, error } = await supabase
       .from("attendance_records")
       .select("attendance_date,status")
+      .gte("attendance_date", new Date(Date.now() - 13 * 86400000).toISOString().slice(0, 10))
       .order("attendance_date");
     if (error) throw error;
     const grouped = new Map<string, any>();
@@ -129,12 +130,22 @@ export const insightsService = {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureHeadcount);
     const { data, error } = await supabase.from("employees").select("joining_date,employment_status");
     if (error) throw error;
-    return (data ?? []).map((r) => ({
-      label: r.joining_date ?? "",
-      joined: 1,
-      exited: r.employment_status === "resigned" ? 1 : 0,
-      headcount: 1,
-    }));
+    const byMonth = new Map<string, { joined: number; exited: number }>();
+    (data ?? []).forEach((r) => {
+      if (!r.joining_date) return;
+      const label = r.joining_date.slice(0, 7);
+      const point = byMonth.get(label) ?? { joined: 0, exited: 0 };
+      point.joined += 1;
+      if (r.employment_status === "resigned") point.exited += 1;
+      byMonth.set(label, point);
+    });
+    let running = 0;
+    return [...byMonth.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, point]) => {
+        running += point.joined - point.exited;
+        return { label, joined: point.joined, exited: point.exited, headcount: running };
+      });
   },
   async departmentDistribution(managerId?: string) {
     if (!isSupabaseConfigured || !supabase)

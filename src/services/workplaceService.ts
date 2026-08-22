@@ -181,6 +181,8 @@ export const workplaceService = {
       type: (r.type ?? "system") as NotificationItem["type"],
       createdAt: r.created_at ?? "",
       read: r.is_read ?? false,
+      ...(r.reference_id ? { referenceId: r.reference_id } : {}),
+      ...(r.reference_type ? { referenceType: r.reference_type } : {}),
     }));
   },
   async auditTrail(options: QueryOptions = {}): Promise<AuditEntry[]> {

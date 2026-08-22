@@ -39,7 +39,7 @@ export const Route = createFileRoute("/payroll")({
 
 function PayrollPage() {
   const queryClient = useQueryClient();
-  const startRun = useMutation({ mutationFn: () => { const now = new Date(); return payrollService.startRun({ year: now.getFullYear(), month: now.getMonth() + 1 }); }, onSuccess: () => { toast.success("Payroll run created"); void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); }, onError: (e) => toast.error("Could not start payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+  const startRun = useMutation({ mutationFn: () => { const now = new Date(); return payrollService.startRun({ year: now.getFullYear(), month: now.getMonth() + 1 }); }, onSuccess: () => { toast.success("Payroll run created"); void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); void queryClient.invalidateQueries({ queryKey: ["payslips"] }); }, onError: (e) => toast.error("Could not start payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
   const { role, user } = useSession();
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
@@ -47,7 +47,7 @@ function PayrollPage() {
 
   const runs = useQuery({ queryKey: ["payroll-runs"], queryFn: () => payrollService.runs(), enabled: !isSelfService });
   const payslips = useQuery({
-    queryKey: ["payslips", isSelfService ? user.id : "all", search, status],
+    queryKey: ["payslips", isSelfService ? (user.employeeId ?? user.id) : "all", search, status],
     queryFn: () =>
       payrollService.payslips({
         ...(isSelfService ? { employeeId: user.employeeId ?? user.id } : {}),
@@ -121,6 +121,16 @@ function PayrollPage() {
   );
 
   const current = runs.data?.[0];
+  // Self-service has no access to org-wide payroll_runs (by design -- runs()
+  // is disabled for them entirely), so the summary cards are built from
+  // their own most recent payslip instead of a run. period is "YYYY-MM", so
+  // the lexicographically largest one is the latest.
+  const latestPayslip = isSelfService
+    ? (payslips.data ?? []).reduce<Payslip | undefined>(
+        (latest, row) => (!latest || row.period > latest.period ? row : latest),
+        undefined,
+      )
+    : undefined;
 
   return (
     <AppLayout>
@@ -144,31 +154,55 @@ function PayrollPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Current period"
-          value={current?.period ?? "—"}
+          value={(isSelfService ? latestPayslip?.period : current?.period) ?? "—"}
           icon={BadgeIndianRupee}
           tone="primary"
-          hint={current ? `Pay date ${shortDate(current.payDate)}` : "No run yet"}
+          hint={
+            isSelfService
+              ? latestPayslip
+                ? `Status: ${latestPayslip.status}`
+                : "No payslip yet"
+              : current
+                ? `Pay date ${shortDate(current.payDate)}`
+                : "No run yet"
+          }
         />
         <StatCard
           label="Gross"
-          value={current ? compactInr(current.gross) : "—"}
+          value={
+            isSelfService
+              ? latestPayslip
+                ? compactInr(latestPayslip.basic + latestPayslip.hra + latestPayslip.allowances + latestPayslip.bonus)
+                : "—"
+              : current
+                ? compactInr(current.gross)
+                : "—"
+          }
           icon={BadgeIndianRupee}
           tone="info"
-          hint={`${current?.employees ?? 0} employees`}
+          hint={isSelfService ? "Basic + HRA + allowances" : `${current?.employees ?? 0} employees`}
         />
         <StatCard
           label="Deductions"
-          value={current ? compactInr(current.deductions) : "—"}
+          value={
+            isSelfService
+              ? latestPayslip
+                ? compactInr(latestPayslip.pf + latestPayslip.tax + latestPayslip.otherDeductions)
+                : "—"
+              : current
+                ? compactInr(current.deductions)
+                : "—"
+          }
           icon={BadgeIndianRupee}
           tone="warning"
           hint="PF, tax and other"
         />
         <StatCard
           label="Net payout"
-          value={current ? compactInr(current.net) : "—"}
+          value={(isSelfService ? latestPayslip && compactInr(latestPayslip.net) : current && compactInr(current.net)) ?? "—"}
           icon={BadgeIndianRupee}
           tone="success"
-          hint={`Status: ${current?.status ?? "draft"}`}
+          hint={`Status: ${(isSelfService ? latestPayslip?.status : current?.status) ?? "draft"}`}
         />
       </div>
 

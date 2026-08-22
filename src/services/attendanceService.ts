@@ -136,14 +136,31 @@ export const attendanceService = {
       status: r.status,
     }));
   },
-  async requestCorrection(payload: { date: string; requested: string; reason: string }) {
+  async requestCorrection(payload: {
+    employeeId: string;
+    attendanceId: string;
+    requestedCheckIn?: string;
+    requestedCheckOut?: string;
+    reason: string;
+  }) {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ ...payload, status: "pending" as const });
-    const resolvedEmployeeId = await requireEmployeeId();
+    if (!payload.attendanceId) throw new Error("Select the attendance record to correct.");
+    if (!payload.requestedCheckIn && !payload.requestedCheckOut)
+      throw new Error("Provide a requested check-in or check-out time.");
+    if (!payload.reason.trim()) throw new Error("A reason is required.");
+    const resolvedEmployeeId = await requireEmployeeId(payload.employeeId);
     const { data, error } = await supabase
       .from("attendance_corrections")
-      .insert({ employee_id: resolvedEmployeeId, reason: payload.reason })
-      .select()
+      .insert({
+        employee_id: resolvedEmployeeId,
+        attendance_id: payload.attendanceId,
+        requested_check_in: payload.requestedCheckIn || null,
+        requested_check_out: payload.requestedCheckOut || null,
+        reason: payload.reason.trim(),
+        status: "pending",
+      })
+      .select("*, employees(first_name,last_name), attendance_records(attendance_date)")
       .single();
     if (error) throw error;
     return data;
