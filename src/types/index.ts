@@ -310,6 +310,20 @@ export interface Complaint {
   updatedAt: string;
 }
 
+export type PasswordResetRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "COMPLETED";
+
+export interface PasswordResetRequest {
+  id: string;
+  employeeId: string | null;
+  employeeName: string;
+  email: string;
+  status: PasswordResetRequestStatus;
+  requestedAt: string;
+  approvedByName: string;
+  approvedAt: string | null;
+  rejectedReason: string | null;
+}
+
 export interface AuditEntry {
   id: string;
   actor: string;

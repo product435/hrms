@@ -1,12 +1,14 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { Eye, EyeOff, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Eye, EyeOff, Loader2, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authService } from "@/services/authService";
+import { passwordResetRequestService } from "@/services/passwordResetRequestService";
+import { supabase } from "@/lib/supabase";
 import { isStrongPassword, passwordChecks } from "@/lib/password";
 
 export const Route = createFileRoute("/reset-password")({
@@ -26,6 +28,38 @@ function ResetPasswordPage() {
   const passwordStatus = passwordChecks(password);
   const confirmPasswordStatus = passwordChecks(confirmPassword);
 
+  // Opening this page from the emailed reset link is what actually
+  // establishes the recovery session (the Supabase browser client exchanges
+  // the link's code/token for one as soon as it sees the URL). If someone
+  // reaches this route any other way -- an expired link, a stale bookmark,
+  // no link at all -- there's no session to update a password against, so
+  // that's surfaced clearly instead of letting them fill out a form that can
+  // only fail at the end.
+  const [sessionStatus, setSessionStatus] = useState<"checking" | "valid" | "invalid">("checking");
+
+  useEffect(() => {
+    if (!supabase) {
+      setSessionStatus("invalid");
+      return;
+    }
+    let active = true;
+    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!active) return;
+      if (event === "PASSWORD_RECOVERY" || session) setSessionStatus("valid");
+    });
+    void supabase.auth.getSession().then(({ data }) => {
+      if (active && data.session) setSessionStatus("valid");
+    });
+    const timeout = setTimeout(() => {
+      if (active) setSessionStatus((current) => (current === "checking" ? "invalid" : current));
+    }, 4000);
+    return () => {
+      active = false;
+      subscription.subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
+  }, []);
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
@@ -41,15 +75,68 @@ function ResetPasswordPage() {
 
     setSubmitting(true);
     const result = await authService.updatePassword(password);
-    setSubmitting(false);
 
     if (result.error) {
+      setSubmitting(false);
       toast.error("Could not update password", { description: result.error.message });
       return;
     }
 
-    toast.success("Password updated");
+    // Best-effort: if this recovery session belongs to an approved
+    // admin-reviewed request, close the loop on its lifecycle. Must happen
+    // before signing out -- it relies on the current (recovery) session.
+    // Never blocks the actual password-update success on this.
+    try {
+      await passwordResetRequestService.markCompleted();
+    } catch {
+      // No matching request is the common case (direct-flow resets, e.g.
+      // the Admin's own) -- nothing to report.
+    }
+
+    // The recovery session is only meant to get the password changed, not to
+    // leave the user silently signed in -- sign out so /sign-in shows the
+    // actual sign-in form rather than bouncing straight past it.
+    await authService.signOut();
+    setSubmitting(false);
+    toast.success("Password updated", { description: "Sign in with your new password." });
     navigate({ to: "/sign-in" });
+  }
+
+  if (sessionStatus === "checking") {
+    return (
+      <AuthLayout title="Reset password" subtitle="Verifying your reset link…">
+        <div className="flex justify-center py-6">
+          <Loader2 className="size-6 animate-spin text-muted-foreground" />
+        </div>
+      </AuthLayout>
+    );
+  }
+
+  if (sessionStatus === "invalid") {
+    return (
+      <AuthLayout
+        title="Reset link invalid or expired"
+        subtitle="This password reset link is no longer valid."
+        footer={
+          <Link to="/sign-in" className="font-medium text-primary hover:underline">
+            Back to sign in
+          </Link>
+        }
+      >
+        <div className="flex flex-col items-center gap-3 py-4 text-center">
+          <span className="grid size-12 place-items-center rounded-2xl bg-destructive/10 text-destructive">
+            <ShieldAlert className="size-6" />
+          </span>
+          <p className="text-sm text-muted-foreground">
+            Reset links expire after a short time and can only be used once. Request a new one to
+            continue.
+          </p>
+          <Button asChild className="mt-2">
+            <Link to="/forgot-password">Request a new reset link</Link>
+          </Button>
+        </div>
+      </AuthLayout>
+    );
   }
 
   return (

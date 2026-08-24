@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, UserPlus } from "lucide-react";
+import { Download, Eye, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuthForPath } from "@/lib/auth-guard";
@@ -107,8 +107,27 @@ function EmployeesPage() {
       { key: "location", header: "Location", cell: (row) => <span className="text-sm">{row.location}</span> },
       { key: "joined", header: "Joined", cell: (row) => <span className="text-sm">{shortDate(row.joinedOn)}</span> },
       { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+      {
+        key: "actions",
+        header: "",
+        align: "right",
+        className: "pr-5",
+        cell: (row) => (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={`View ${row.firstName} ${row.lastName}'s profile`}
+            onClick={(event) => {
+              event.stopPropagation();
+              navigate({ to: "/employees/$employeeId", params: { employeeId: row.id } });
+            }}
+          >
+            <Eye className="size-4" />
+          </Button>
+        ),
+      },
     ],
-    [],
+    [navigate],
   );
 
   return (
@@ -153,7 +172,7 @@ function EmployeesPage() {
                 onChange: setDepartment,
                 options: [
                   { value: "all", label: "All departments" },
-                  ...[...new Set((departments.data ?? []).map((d) => d.name))].map((name) => ({ value: name, label: name })),
+                  ...(departments.data ?? []).map((d) => ({ value: d.name, label: d.name })),
                 ],
               },
               {

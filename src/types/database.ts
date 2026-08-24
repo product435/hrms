@@ -1633,6 +1633,60 @@ export type Database = {
         }
         Relationships: []
       }
+      password_reset_requests: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          email: string
+          employee_id: string | null
+          id: string
+          rejected_reason: string | null
+          requested_at: string
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          email: string
+          employee_id?: string | null
+          id?: string
+          rejected_reason?: string | null
+          requested_at?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          email?: string
+          employee_id?: string | null
+          id?: string
+          rejected_reason?: string | null
+          requested_at?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "password_reset_requests_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "password_reset_requests_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payroll_records: {
         Row: {
           allowances: number | null
@@ -2068,6 +2122,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      complete_password_reset_request: { Args: never; Returns: undefined }
       create_employee_complaint: {
         Args: {
           p_category: string
@@ -2098,21 +2153,18 @@ export type Database = {
       current_org_id: { Args: never; Returns: string }
       current_role: { Args: never; Returns: string }
       current_user_role: { Args: never; Returns: string }
-      debug_list_policies: {
-        Args: { target_tables: string[] }
-        Returns: {
-          check_expr: string
-          cmd: string
-          policy_name: string
-          table_name: string
-          using_expr: string
-        }[]
-      }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_hr: { Args: never; Returns: boolean }
       is_manager: { Args: never; Returns: boolean }
       is_my_direct_report: { Args: { emp_id: string }; Returns: boolean }
       is_org_member: { Args: { target_org: string }; Returns: boolean }
+      request_password_reset: {
+        Args: { p_email: string }
+        Returns: {
+          is_admin_account: boolean
+          request_id: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

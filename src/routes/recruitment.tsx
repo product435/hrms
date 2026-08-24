@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Plus, Star, Users } from "lucide-react";
+import { Briefcase, Plus, Star, UserX, Users } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -40,7 +40,7 @@ export const Route = createFileRoute("/recruitment")({
   component: RecruitmentPage,
 });
 
-const STAGES: Candidate["stage"][] = ["applied", "screening", "interview", "offer", "hired"];
+const STAGES: Candidate["stage"][] = ["applied", "screening", "interview", "offer", "hired", "rejected"];
 
 function RecruitmentPage() {
   const [search, setSearch] = useState("");
@@ -70,7 +70,7 @@ function RecruitmentPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Open roles"
           value={String((openings.data ?? []).filter((j) => j.stage === "open").length)}
@@ -98,6 +98,13 @@ function RecruitmentPage() {
           icon={Star}
           tone="warning"
           hint="awaiting acceptance"
+        />
+        <StatCard
+          label="Rejected"
+          value={String(rows.filter((c) => c.stage === "rejected").length)}
+          icon={UserX}
+          tone="destructive"
+          hint="current view"
         />
       </div>
 
@@ -142,12 +149,11 @@ function RecruitmentPage() {
               options: [
                 { value: "all", label: "All stages" },
                 ...STAGES.map((value) => ({ value, label: value })),
-                { value: "rejected", label: "rejected" },
               ],
             },
           ]}
         />
-        <div className="scroll-slim grid gap-3 overflow-x-auto lg:grid-cols-5">
+        <div className="scroll-slim grid gap-3 overflow-x-auto lg:grid-cols-6">
           {STAGES.map((column) => {
             const items = rows.filter((c) => c.stage === column);
             return (

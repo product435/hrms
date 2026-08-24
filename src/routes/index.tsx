@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeIndianRupee,
   Briefcase,
@@ -11,6 +11,7 @@ import {
   TrendingDown,
   Users,
 } from "lucide-react";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -28,6 +29,7 @@ import { talentService } from "@/services/talentService";
 import { workplaceService } from "@/services/workplaceService";
 import { attendanceService } from "@/services/attendanceService";
 import { assetService } from "@/services/assetService";
+import { passwordResetRequestService } from "@/services/passwordResetRequestService";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { compactInr, dayMonth, inr, initialsOf, percent, shortDate } from "@/lib/format";
@@ -279,7 +281,85 @@ function OrgDashboard() {
           </Button>
         </SectionCard>
       </div>
+
+      {role === "admin" ? <PasswordResetRequestsSection /> : null}
     </>
+  );
+}
+
+// Admin-only: users don't choose their own role or reset their own password
+// unilaterally -- Forgot Password queues a request here for every role
+// except the Admin's own (who has no one else to approve it). Approving
+// sends the real Supabase recovery email; nothing here ever generates or
+// displays a plaintext password.
+function PasswordResetRequestsSection() {
+  const queryClient = useQueryClient();
+  const requests = useQuery({
+    queryKey: ["password-reset-requests"],
+    queryFn: () => passwordResetRequestService.listPending(),
+  });
+
+  const approve = useMutation({
+    mutationFn: (vars: { id: string; email: string }) => passwordResetRequestService.approve(vars.id, vars.email),
+    onSuccess: () => {
+      toast.success("Reset approved", { description: "A secure reset email has been sent." });
+      void queryClient.invalidateQueries({ queryKey: ["password-reset-requests"] });
+    },
+    onError: (e) =>
+      toast.error("Could not approve request", { description: e instanceof Error ? e.message : "Try again." }),
+  });
+
+  const reject = useMutation({
+    mutationFn: (id: string) => passwordResetRequestService.reject(id, "Rejected by admin"),
+    onSuccess: () => {
+      toast.success("Request rejected");
+      void queryClient.invalidateQueries({ queryKey: ["password-reset-requests"] });
+    },
+    onError: (e) =>
+      toast.error("Could not reject request", { description: e instanceof Error ? e.message : "Try again." }),
+  });
+
+  const items = requests.data ?? [];
+  if (!requests.isLoading && items.length === 0) return null;
+
+  return (
+    <SectionCard
+      title="Password reset requests"
+      description="Approve to send a secure reset link, or reject."
+      bodyClassName="p-0"
+    >
+      <ul className="divide-y divide-border">
+        {items.map((item) => (
+          <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{item.employeeName || item.email}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {item.email} · requested {shortDate(item.requestedAt)}
+              </p>
+            </div>
+            <StatusBadge status={item.status} />
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={approve.isPending || reject.isPending}
+                onClick={() => approve.mutate({ id: item.id, email: item.email })}
+              >
+                Approve
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={approve.isPending || reject.isPending}
+                onClick={() => reject.mutate(item.id)}
+              >
+                Reject
+              </Button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </SectionCard>
   );
 }
 

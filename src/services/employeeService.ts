@@ -2,6 +2,7 @@ import { departments as fixtureDepartments, employees as fixtureEmployees } from
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Department, Employee, Role } from "@/types";
 import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import { displayName, normalizeKey } from "@/lib/normalize";
 
 function mapEmployee(row: any): Employee {
   const department = row.departments?.name ?? row.department ?? "";
@@ -140,7 +141,7 @@ export const employeeService = {
             ) &&
             (!options.department ||
               options.department === "all" ||
-              e.department === options.department) &&
+              normalizeKey(e.department) === normalizeKey(options.department)) &&
             (!options.status || options.status === "all" || e.status === options.status),
         ),
       );
@@ -160,7 +161,12 @@ export const employeeService = {
     if (error) throw error;
     return (data ?? [])
       .map(mapEmployee)
-      .filter((employee) => !options.department || options.department === "all" || employee.department === options.department);
+      .filter(
+        (employee) =>
+          !options.department ||
+          options.department === "all" ||
+          normalizeKey(employee.department) === normalizeKey(options.department),
+      );
   },
   async getById(id: string): Promise<Employee | null> {
     if (!isSupabaseConfigured || !supabase)
@@ -188,6 +194,11 @@ export const employeeService = {
     if (error) throw error;
     return (data ?? []).map(mapEmployee);
   },
+  // Multiple department rows can share the same name (duplicate test data,
+  // trailing-space or casing variants -- e.g. "QA", "QA ", "qa"). They
+  // represent one logical department to the business, so they're merged
+  // into a single entry here rather than left to render as separate
+  // cards/dropdown options/chart segments with split headcounts.
   async departments(): Promise<Department[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureDepartments);
     const { data, error } = await supabase
@@ -201,15 +212,38 @@ export const employeeService = {
     (employees.data ?? []).forEach((row: any) => {
       if (row.department_id) counts.set(row.department_id, (counts.get(row.department_id) ?? 0) + 1);
     });
-    return (data ?? []).map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      head: row.manager ? `${row.manager.first_name ?? ""} ${row.manager.last_name ?? ""}`.trim() : "Unassigned",
-      headcount: counts.get(row.id) ?? 0,
-      openRoles: 0,
-      designations: (row.designations ?? []).map((d: any) => d.name),
-      costCenter: "",
-    }));
+    const grouped = new Map<string, Department>();
+    (data ?? []).forEach((row: any) => {
+      const key = normalizeKey(row.name);
+      if (!key) return;
+      const rowHead = row.manager
+        ? `${row.manager.first_name ?? ""} ${row.manager.last_name ?? ""}`.trim()
+        : "";
+      const rowDesignations: string[] = (row.designations ?? []).map((d: any) => d.name);
+      const existing = grouped.get(key);
+      if (existing) {
+        existing.headcount += counts.get(row.id) ?? 0;
+        if (!existing.head && rowHead) existing.head = rowHead;
+        rowDesignations.forEach((name) => {
+          if (!existing.designations.some((d) => normalizeKey(d) === normalizeKey(name))) {
+            existing.designations.push(name);
+          }
+        });
+      } else {
+        grouped.set(key, {
+          id: row.id,
+          name: displayName(row.name),
+          head: rowHead,
+          headcount: counts.get(row.id) ?? 0,
+          openRoles: 0,
+          designations: [...rowDesignations],
+          costCenter: "",
+        });
+      }
+    });
+    return [...grouped.values()]
+      .map((dept) => ({ ...dept, head: dept.head || "Unassigned" }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   },
   async createDepartment(input: { name: string; code?: string; description?: string }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
@@ -233,7 +267,12 @@ export const employeeService = {
       return fromFixture([...new Set(fixtureDepartments.flatMap((d) => d.designations))].sort());
     const { data, error } = await supabase.from("designations").select("name").order("name");
     if (error) throw error;
-    return [...new Set((data ?? []).map((row: any) => row.name))].sort();
+    const seen = new Map<string, string>();
+    (data ?? []).forEach((row: any) => {
+      const key = normalizeKey(row.name);
+      if (key && !seen.has(key)) seen.set(key, displayName(row.name));
+    });
+    return [...seen.values()].sort();
   },
   async createDesignation(input: { name: string; departmentId?: string; code?: string }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");

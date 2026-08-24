@@ -11,6 +11,7 @@ import {
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { fromFixture } from "./api";
+import { displayName, normalizeKey } from "@/lib/normalize";
 export interface CompanySummary {
   headcount: number;
   presentToday: number;
@@ -166,7 +167,18 @@ export const insightsService = {
     if (employeeError) throw employeeError;
     const counts = new Map<string, number>();
     (employees ?? []).forEach((employee) => { if (employee.department_id) counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1); });
-    return (departments ?? []).map((d) => ({ name: d.name ?? "Unassigned", value: counts.get(d.id) ?? 0, openRoles: 0 }));
+    // Same normalized-name aggregation as employeeService.departments(), so
+    // duplicate department rows (e.g. "QA", "QA ") show as one chart segment
+    // with a combined headcount here too, on both Dashboard and Reports.
+    const grouped = new Map<string, { name: string; value: number }>();
+    (departments ?? []).forEach((d) => {
+      const key = d.name ? normalizeKey(d.name) : "unassigned";
+      const value = counts.get(d.id) ?? 0;
+      const existing = grouped.get(key);
+      if (existing) existing.value += value;
+      else grouped.set(key, { name: d.name ? displayName(d.name) : "Unassigned", value });
+    });
+    return [...grouped.values()].map((g) => ({ ...g, openRoles: 0 }));
   },
   async leaveMix() {
     if (!isSupabaseConfigured || !supabase)

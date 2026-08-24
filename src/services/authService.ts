@@ -1,6 +1,31 @@
 import { isSupabaseConfigured, supabase, type SupabaseClientLike } from "@/lib/supabase";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { Role, SessionUser } from "@/types";
+import { isValidEmail, sanitizeEmail } from "@/lib/email";
+
+// Supabase auth errors carry a machine-readable `code` in current supabase-js
+// versions, but that's not guaranteed across every version/error path, so
+// this also falls back to matching the message text.
+function mapAuthError(error: { message: string; code?: string | undefined; status?: number | undefined }): string {
+  const code = error.code ?? "";
+  const msg = error.message ?? "";
+  if (code === "email_address_invalid" || /email.*invalid|invalid.*email/i.test(msg)) {
+    return "This email address isn't accepted. Double-check it and try again.";
+  }
+  if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit" || /rate limit/i.test(msg)) {
+    return "Too many attempts. Please wait a minute and try again.";
+  }
+  if (code === "email_not_confirmed") {
+    return "Confirm your email address before continuing. Check your inbox for the confirmation link.";
+  }
+  if (/failed to fetch|network|timeout/i.test(msg)) {
+    return "Network error reaching the authentication service. Check your connection and try again.";
+  }
+  if (/redirect|url not allowed/i.test(msg)) {
+    return "The application's authentication redirect isn't configured correctly. Contact an administrator.";
+  }
+  return msg || "Something went wrong. Please try again.";
+}
 
 export interface AuthSession {
   user: SessionUser;
@@ -221,15 +246,16 @@ export const authService = {
           message: "Supabase Auth is not configured. Add the required Vite environment variables.",
         },
       };
-    if (!email.trim() || !password) return { error: { message: "Enter your email and password." } };
+    const cleanEmail = sanitizeEmail(email);
+    if (!cleanEmail || !password) return { error: { message: "Enter your email and password." } };
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
+      email: cleanEmail,
       password,
     });
     if (error) {
       const message = /invalid login credentials/i.test(error.message)
         ? "The email or password is incorrect. Check your credentials and try again."
-        : error.message;
+        : mapAuthError(error);
       return { error: { message } };
     }
     try {
@@ -256,12 +282,19 @@ export const authService = {
           message: "Supabase Auth is not configured. Add the required Vite environment variables.",
         },
       };
+    const cleanEmail = sanitizeEmail(input.email);
+    if (!isValidEmail(cleanEmail)) return { error: { message: "Enter a valid email address." } };
+    // No role/employee fields are set here on purpose: public sign-up always
+    // becomes an EMPLOYEE, and the employee record is created server-side by
+    // the on_auth_user_created trigger (handle_new_user), which is the only
+    // thing with the privilege to also assign an organization -- the client
+    // has no business deciding either of those for itself.
     const { data, error } = await supabase.auth.signUp({
-      email: input.email.trim(),
+      email: cleanEmail,
       password: input.password,
       options: { data: { full_name: input.name.trim() } },
     });
-    if (error) return { error: { message: error.message } };
+    if (error) return { error: { message: mapAuthError(error) } };
     if (data.session && data.user) {
       try {
         writeSession(await sessionForUser(supabase, data.user));
@@ -283,13 +316,21 @@ export const authService = {
           message: "Supabase Auth is not configured. Add the required Vite environment variables.",
         },
       };
+    // Only the raw address is ever sent to Supabase -- no markdown/mailto
+    // formatting, no surrounding quotes -- and it's validated as a plausible
+    // email before the request is even made.
+    const cleanEmail = sanitizeEmail(email);
+    if (!cleanEmail) return { error: { message: "Enter your email address." } };
+    if (!isValidEmail(cleanEmail)) return { error: { message: "Enter a valid email address." } };
+    // Uses the actual origin the app is currently running on (whatever port
+    // Vite picked), not a hardcoded host, so this works in dev and prod alike.
     const redirectTo =
       typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
     const { error } = await supabase.auth.resetPasswordForEmail(
-      email.trim(),
+      cleanEmail,
       redirectTo ? { redirectTo } : undefined,
     );
-    return error ? { error: { message: error.message } } : { success: true };
+    return error ? { error: { message: mapAuthError(error) } } : { success: true };
   },
   async updatePassword(password: string): Promise<{ error?: AuthError; success?: boolean }> {
     if (!isSupabaseConfigured || !supabase)
