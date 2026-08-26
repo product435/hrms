@@ -75,7 +75,14 @@ function ReportsPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Headcount" value={String(summary.data?.headcount ?? 0)} icon={Users} />
-            <StatCard label="Attrition" value={percent(summary.data?.attritionRate ?? 0)} tone="warning" />
+            <StatCard
+              label="Attrition"
+              value={summary.data?.attritionRate != null ? percent(summary.data.attritionRate) : "N/A"}
+              tone="warning"
+              {...(summary.data?.attritionRate == null
+                ? { hint: "Requires an exit-date field not in the current schema" }
+                : {})}
+            />
             <StatCard label="Open positions" value={String(summary.data?.openPositions ?? 0)} />
             <StatCard label="Payroll net" value={compactInr(summary.data?.payrollNet ?? 0)} />
           </div>

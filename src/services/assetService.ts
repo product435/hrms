@@ -1,7 +1,19 @@
 import { assetEvents as fixtureEvents, assets as fixtureAssets } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import type { Asset, AssetEvent } from "@/types";
-import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import type { Asset, AssetEvent, AssetRequest } from "@/types";
+import { currentUserId, fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
+const mapAssetRequest = (r: any): AssetRequest => ({
+  id: r.id,
+  employeeId: r.employee_id,
+  employeeName: r.employees ? `${r.employees.first_name} ${r.employees.last_name}` : "",
+  category: r.category,
+  details: r.details ?? "",
+  status: r.status,
+  reviewedByName: r.reviewer?.full_name ?? "",
+  reviewedAt: r.reviewed_at ?? null,
+  rejectionReason: r.rejection_reason ?? null,
+  requestedAt: r.requested_at,
+});
 const mapAsset = (r: any): Asset => {
   const activeAssignment = (r.asset_assignments ?? []).find((a: any) => !a.returned_at);
   return {
@@ -198,5 +210,58 @@ export const assetService = {
       .single();
     if (error) throw error;
     return data;
+  },
+  // Employee-initiated ask for a new asset. Deliberately not the same thing
+  // as assign() above: this only records what was requested and its
+  // approval decision -- assigning a specific physical unit afterwards is
+  // still the existing admin/hr asset-management workflow.
+  async requestAsset(input: { category: string; details: string }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const employeeId = await requireEmployeeId();
+    const { data, error } = await supabase
+      .from("asset_requests")
+      .insert({
+        employee_id: employeeId,
+        category: input.category,
+        details: input.details.trim() || null,
+      })
+      .select("*, employees(first_name,last_name)")
+      .single();
+    if (error) throw error;
+    return mapAssetRequest(data);
+  },
+  async myAssetRequests(employeeId: string): Promise<AssetRequest[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase
+      .from("asset_requests")
+      .select("*, employees(first_name,last_name), reviewer:reviewed_by(full_name)")
+      .eq("employee_id", employeeId)
+      .order("requested_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(mapAssetRequest);
+  },
+  // Admin/HR-only (RLS-enforced): every request across the organization.
+  async listAssetRequests(): Promise<AssetRequest[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase
+      .from("asset_requests")
+      .select("*, employees(first_name,last_name), reviewer:reviewed_by(full_name)")
+      .order("requested_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map(mapAssetRequest);
+  },
+  async decideAssetRequest(id: string, decision: "approved" | "rejected", rejectionReason?: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const reviewerId = await currentUserId();
+    const { error } = await supabase
+      .from("asset_requests")
+      .update({
+        status: decision,
+        ...(reviewerId ? { reviewed_by: reviewerId } : {}),
+        reviewed_at: new Date().toISOString(),
+        ...(decision === "rejected" ? { rejection_reason: rejectionReason?.trim() || null } : {}),
+      })
+      .eq("id", id);
+    if (error) throw error;
   },
 };

@@ -207,7 +207,7 @@ export const ROUTE_ROLES: Record<string, Role[]> = {
   "/payroll": ["admin", "hr", "employee"],
   "/expenses": ["admin", "hr", "manager", "employee"],
   "/goals": ["admin", "hr", "manager", "employee"],
-  "/performance": ["admin", "hr", "manager"],
+  "/performance": ["admin", "hr", "manager", "employee"],
   "/assets": ["admin", "hr", "manager", "employee"],
   "/documents": ["admin", "hr", "manager", "employee"],
   "/helpdesk": ["admin", "hr", "manager", "employee"],

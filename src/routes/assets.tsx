@@ -15,10 +15,13 @@ import { assetService } from "@/services/assetService";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { inr, shortDate } from "@/lib/format";
-import type { Asset } from "@/types";
+import type { Asset, AssetCategory } from "@/types";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+const REQUESTABLE_CATEGORIES: AssetCategory[] = ["Laptop", "Desktop", "Monitor", "Mobile", "ID Card", "Other"];
 
 export const Route = createFileRoute("/assets")({
   beforeLoad: () => requireAuthForPath("/assets"),
@@ -59,6 +62,47 @@ function AssetsPage() {
     enabled: !isLoading,
   });
   const history = useQuery({ queryKey: ["asset-history", isSelfService ? user.employeeId : "all"], queryFn: () => assetService.history(undefined, isSelfService ? user.employeeId : undefined) });
+
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestForm, setRequestForm] = useState<{ category: AssetCategory; details: string }>({
+    category: "Laptop",
+    details: "",
+  });
+  const myRequests = useQuery({
+    queryKey: ["asset-requests", "mine", user.employeeId ?? user.id],
+    queryFn: () => assetService.myAssetRequests(user.employeeId ?? user.id),
+    enabled: !isLoading && isSelfService,
+  });
+  const requestAsset = useMutation({
+    mutationFn: () => assetService.requestAsset(requestForm),
+    onSuccess: () => {
+      toast.success("Asset request submitted");
+      setRequestOpen(false);
+      setRequestForm({ category: "Laptop", details: "" });
+      void queryClient.invalidateQueries({ queryKey: ["asset-requests", "mine"] });
+    },
+    onError: (e) =>
+      toast.error("Could not submit request", { description: e instanceof Error ? e.message : "Try again." }),
+  });
+
+  // Admin/HR review queue -- RLS restricts this to whoever is actually
+  // allowed to see it, so it's simplest to just always fetch it when
+  // canManage and let the section render nothing if there's nothing pending.
+  const assetRequests = useQuery({
+    queryKey: ["asset-requests", "all"],
+    queryFn: () => assetService.listAssetRequests(),
+    enabled: !isLoading && canManage,
+  });
+  const decideAssetRequest = useMutation({
+    mutationFn: (vars: { id: string; decision: "approved" | "rejected" }) =>
+      assetService.decideAssetRequest(vars.id, vars.decision),
+    onSuccess: (_data, vars) => {
+      toast.success(vars.decision === "approved" ? "Request approved" : "Request rejected");
+      void queryClient.invalidateQueries({ queryKey: ["asset-requests", "all"] });
+    },
+    onError: (e) =>
+      toast.error("Could not update request", { description: e instanceof Error ? e.message : "Try again." }),
+  });
 
   const returnAsset = useMutation({
     mutationFn: (tag: string) => assetService.markReturned(tag),
@@ -161,6 +205,10 @@ function AssetsPage() {
             <Button onClick={() => setAddOpen(true)}>
               <Plus className="size-4" /> Add asset
             </Button>
+          ) : isSelfService ? (
+            <Button onClick={() => setRequestOpen(true)}>
+              <Plus className="size-4" /> Request asset
+            </Button>
           ) : null
         }
       />
@@ -257,9 +305,122 @@ function AssetsPage() {
               <span className="shrink-0 text-xs text-muted-foreground">{shortDate(event.date)}</span>
             </li>
           ))}
+          {history.data?.length === 0 ? (
+            <li className="px-5 py-8 text-center text-sm text-muted-foreground">No history yet.</li>
+          ) : null}
         </ul>
       </SectionCard>
+
+      {isSelfService ? (
+        <SectionCard title="My asset requests" description="Status of assets you've requested" bodyClassName="p-0">
+          <ul className="divide-y divide-border">
+            {(myRequests.data ?? []).map((request) => (
+              <li key={request.id} className="flex items-center gap-3 px-5 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{request.category}</p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {request.details || "No details provided"} · requested {shortDate(request.requestedAt)}
+                  </p>
+                  {request.status === "rejected" && request.rejectionReason ? (
+                    <p className="truncate text-xs text-destructive">Reason: {request.rejectionReason}</p>
+                  ) : null}
+                </div>
+                <StatusBadge status={request.status} />
+              </li>
+            ))}
+            {myRequests.data?.length === 0 ? (
+              <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                No asset requests yet.
+              </li>
+            ) : null}
+          </ul>
+        </SectionCard>
+      ) : null}
+
+      {canManage ? (
+        <SectionCard title="Asset requests" description="Employee requests awaiting review" bodyClassName="p-0">
+          <ul className="divide-y divide-border">
+            {(assetRequests.data ?? [])
+              .filter((r) => r.status === "pending")
+              .map((request) => (
+                <li key={request.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{request.employeeName || "Unknown employee"}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {request.category} · {request.details || "No details provided"} · requested{" "}
+                      {shortDate(request.requestedAt)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={decideAssetRequest.isPending}
+                      onClick={() => decideAssetRequest.mutate({ id: request.id, decision: "approved" })}
+                    >
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={decideAssetRequest.isPending}
+                      onClick={() => decideAssetRequest.mutate({ id: request.id, decision: "rejected" })}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            {(assetRequests.data ?? []).filter((r) => r.status === "pending").length === 0 ? (
+              <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                No asset requests pending review.
+              </li>
+            ) : null}
+          </ul>
+        </SectionCard>
+      ) : null}
+
       <Dialog open={addOpen} onOpenChange={setAddOpen}><DialogContent><DialogHeader><DialogTitle>Add asset</DialogTitle></DialogHeader><div className="grid gap-3 sm:grid-cols-2">{([['code','Asset code'],['name','Name'],['serialNumber','Serial number'],['location','Location'],['purchaseCost','Purchase cost']] as const).map(([key,label]) => <div key={key}><Label>{label}</Label><Input type={key === 'purchaseCost' ? 'number' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}<div><Label>Category</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Laptop</option><option>Desktop</option><option>Monitor</option><option>Mobile</option><option>ID Card</option><option>Other</option></select></div></div><DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={() => addAsset.mutate()} disabled={addAsset.isPending}>{addAsset.isPending ? "Saving…" : "Add asset"}</Button></DialogFooter></DialogContent></Dialog>
+
+      <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Request an asset</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="space-y-1">
+              <Label>Category</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={requestForm.category}
+                onChange={(e) => setRequestForm({ ...requestForm, category: e.target.value as AssetCategory })}
+              >
+                {REQUESTABLE_CATEGORIES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <Label>Details</Label>
+              <Textarea
+                value={requestForm.details}
+                placeholder="Why do you need this, and any specifics (e.g. spec, urgency)"
+                onChange={(e) => setRequestForm({ ...requestForm, details: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRequestOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => requestAsset.mutate()} disabled={requestAsset.isPending}>
+              {requestAsset.isPending ? "Submitting…" : "Submit request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

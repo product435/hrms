@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FileText, Upload } from "lucide-react";
+import { Eye, FileText, Upload } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
@@ -33,6 +33,7 @@ function DocumentsPage() {
   const { role, user, isLoading } = useSession();
   const isSelfService = role === "employee";
   const canManage = role === "admin" || role === "hr";
+  const isTeamView = role === "manager";
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -86,6 +87,26 @@ function DocumentsPage() {
     retry: false,
   });
 
+  const viewDocument = useMutation({
+    mutationFn: async (filePath: string) => {
+      // Open the tab synchronously (inside the click handler) so the browser
+      // still counts it as a direct user gesture, then point it at the
+      // signed URL once fetched -- fetching the URL first and calling
+      // window.open() after the await is what popup blockers usually kill.
+      const tab = window.open("", "_blank");
+      try {
+        const url = await workplaceService.getDocumentUrl(filePath);
+        if (tab) tab.location.href = url;
+        else window.location.href = url;
+      } catch (error) {
+        tab?.close();
+        throw error;
+      }
+    },
+    onError: (error) =>
+      toast.error("Could not open document", { description: error instanceof Error ? error.message : "Try again." }),
+  });
+
   const columns = useMemo<Column<DocumentItem>[]>(
     () => [
       {
@@ -122,16 +143,39 @@ function DocumentsPage() {
           <StatusBadge status={row.verified ? "verified" : "pending"} tone={row.verified ? "success" : "warning"} />
         ),
       },
+      {
+        key: "actions",
+        header: "Actions",
+        align: "right",
+        className: "pr-5",
+        cell: (row) => (
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!row.filePath || (viewDocument.isPending && viewDocument.variables === row.filePath)}
+              onClick={() => row.filePath && viewDocument.mutate(row.filePath)}
+              title={row.filePath ? "View / open document" : "File not available"}
+            >
+              <Eye className="size-3.5" /> View
+            </Button>
+          </div>
+        ),
+      },
     ],
-    [],
+    [viewDocument],
   );
 
   return (
     <AppLayout>
       <PageHeader
         eyebrow="Workplace"
-        title={isSelfService ? "My documents" : "Document library"}
-        description="Identity proofs, contracts, policies and payroll documents with verification status."
+        title={isSelfService ? "My documents" : isTeamView ? "Team documents" : "Document library"}
+        description={
+          isTeamView
+            ? "Documents on file for your direct reports."
+            : "Identity proofs, contracts, policies and payroll documents with verification status."
+        }
         actions={
           isSelfService ? (
             <>

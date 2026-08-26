@@ -1,7 +1,7 @@
 import { payrollRuns as fixtureRuns, payslips as fixturePayslips } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PayrollRun, Payslip } from "@/types";
-import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
 const periodOf = (year: unknown, month: unknown) =>
   year && month ? `${year}-${String(month).padStart(2, "0")}` : "";
 
@@ -51,6 +51,19 @@ export const payrollService = {
   async startRun(input: { year: number; month: number }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const organizationId = await requireOrganizationId();
+    // If this period was already processed, re-clicking Start must not
+    // silently revert its status back to draft or reset its (already paid)
+    // records back to pending -- return the existing run untouched instead.
+    const existing = await supabase
+      .from("payroll_runs")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .eq("year", input.year)
+      .eq("month", input.month)
+      .maybeSingle();
+    if (existing.error) throw existing.error;
+    if (existing.data?.status === "processed" || existing.data?.status === "approved") return existing.data;
+
     const { data: run, error: runError } = await supabase
       .from("payroll_runs")
       .upsert(
@@ -116,6 +129,144 @@ export const payrollService = {
     }
     return run;
   },
+  // Locks a draft run's numbers and hands it off for approval. Deliberately
+  // does not touch payroll_records or payslips -- that only happens on
+  // approveRun(), so a processed-but-not-yet-approved run never shows as
+  // paid. Guarded so it can only fire from "draft", once.
+  async processRun(runId: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data: run, error: fetchError } = await supabase
+      .from("payroll_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+    if (fetchError) throw fetchError;
+    if (run.status !== "draft") {
+      throw new Error(`This run is already "${run.status}" and cannot be processed again.`);
+    }
+    const { data: records, error: recordsError } = await supabase
+      .from("payroll_records")
+      .select("id")
+      .eq("payroll_run_id", runId);
+    if (recordsError) throw recordsError;
+    if (!records?.length) throw new Error("This payroll run has no records to process.");
+
+    const processedBy = await currentUserId();
+    const { error: runError } = await supabase
+      .from("payroll_runs")
+      .update({
+        status: "processed",
+        processed_at: new Date().toISOString(),
+        ...(processedBy ? { processed_by: processedBy } : {}),
+      })
+      .eq("id", runId);
+    if (runError) throw runError;
+  },
+  // Final sign-off: marks every record in the run paid and generates one
+  // payslip per record (skipping any that already have one, so re-approving
+  // after a partial failure never duplicates). Only fires from "processed".
+  //
+  // No real PDF-generation capability exists anywhere in this project, and
+  // building one would be exactly the "large PDF-generation system" this was
+  // told not to invent. Instead each payslip is a small, real, private text
+  // file -- genuine stored content built from this record's actual figures,
+  // not a fake URL -- uploaded to the same private `documents` bucket
+  // Documents already uses, under the same <employeeId>/... path convention.
+  // That reuses the bucket's existing self/admin-hr/manager RLS policies
+  // as-is: no new bucket, no new storage policy, no new table.
+  async approveRun(runId: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data: run, error: fetchError } = await supabase
+      .from("payroll_runs")
+      .select("status, year, month")
+      .eq("id", runId)
+      .single();
+    if (fetchError) throw fetchError;
+    if (run.status !== "processed") {
+      throw new Error(
+        run.status === "approved" ? "This run has already been approved." : "This run must be processed before it can be approved.",
+      );
+    }
+
+    const { data: records, error: recordsError } = await supabase
+      .from("payroll_records")
+      .select("id, employee_id, basic, hra, allowances, bonus, pf, tax, total_deductions, net_salary, employees(first_name,last_name)")
+      .eq("payroll_run_id", runId);
+    if (recordsError) throw recordsError;
+    if (!records?.length) throw new Error("This payroll run has no records to approve.");
+
+    const now = new Date().toISOString();
+    const { error: updateRecordsError } = await supabase
+      .from("payroll_records")
+      .update({ payment_status: "paid", paid_at: now })
+      .eq("payroll_run_id", runId);
+    if (updateRecordsError) throw updateRecordsError;
+
+    const recordIds = records.map((r) => r.id);
+    const { data: existingPayslips, error: existingError } = await supabase
+      .from("payslips")
+      .select("payroll_record_id")
+      .in("payroll_record_id", recordIds);
+    if (existingError) throw existingError;
+    const existingIds = new Set((existingPayslips ?? []).map((p) => p.payroll_record_id));
+    const missing = records.filter((r) => !existingIds.has(r.id));
+
+    const period = periodOf(run.year, run.month);
+    for (const r of missing) {
+      const name = r.employees ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim() : "Employee";
+      const totalDeductions = Number(r.total_deductions ?? 0);
+      const text = [
+        `Payslip - ${period}`,
+        `Employee: ${name}`,
+        "",
+        `Basic: ${r.basic ?? 0}`,
+        `HRA: ${r.hra ?? 0}`,
+        `Allowances: ${r.allowances ?? 0}`,
+        `Bonus: ${r.bonus ?? 0}`,
+        `PF: ${r.pf ?? 0}`,
+        `Tax: ${r.tax ?? 0}`,
+        `Total deductions: ${totalDeductions}`,
+        `Net pay: ${r.net_salary ?? 0}`,
+      ].join("\n");
+      const path = `${r.employee_id}/payslip-${period}.txt`;
+      const upload = await supabase.storage
+        .from("documents")
+        .upload(path, new Blob([text], { type: "text/plain" }), { upsert: true });
+      if (upload.error) throw upload.error;
+      const { error: insertError } = await supabase
+        .from("payslips")
+        .insert({ payroll_record_id: r.id, payslip_url: path, generated_at: now });
+      if (insertError) throw insertError;
+    }
+
+    const { error: approveError } = await supabase
+      .from("payroll_runs")
+      .update({ status: "approved" })
+      .eq("id", runId);
+    if (approveError) throw approveError;
+  },
+  // Sends a processed-but-not-yet-approved run back to draft for correction
+  // (e.g. a salary structure needs fixing before payout) -- there is no
+  // separate "rejected" terminal state added, since nothing in the existing
+  // UI could act on one; "draft" is immediately re-processable with the
+  // existing Start/Process actions. Cannot reject an already-approved run.
+  async rejectRun(runId: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data: run, error: fetchError } = await supabase
+      .from("payroll_runs")
+      .select("status")
+      .eq("id", runId)
+      .single();
+    if (fetchError) throw fetchError;
+    if (run.status !== "processed") {
+      throw new Error(run.status === "approved" ? "An approved run cannot be rejected." : "Only a processed run can be rejected.");
+    }
+    const { error } = await supabase
+      .from("payroll_runs")
+      .update({ status: "draft", processed_at: null, processed_by: null })
+      .eq("id", runId);
+    if (error) throw error;
+  },
   async runs(): Promise<PayrollRun[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureRuns);
     const { data, error } = await supabase
@@ -156,6 +307,15 @@ export const payrollService = {
       .or(`id.eq.${id},payroll_record_id.eq.${id}`)
       .maybeSingle();
     if (error) throw error;
-    return { id, url: data?.payslip_url ?? null };
+    const stored = data?.payslip_url ?? null;
+    if (!stored) return { id, url: null };
+    // Older/seed rows may hold a plain external URL (never a real private
+    // file) -- opened as-is, unchanged from before. New rows hold a private
+    // documents-bucket object path, exchanged for a short-lived signed URL
+    // exactly like Documents' own View/Open does.
+    if (/^https?:\/\//i.test(stored)) return { id, url: stored };
+    const signed = await supabase.storage.from("documents").createSignedUrl(stored, 120);
+    if (signed.error) throw signed.error;
+    return { id, url: signed.data?.signedUrl ?? null };
   },
 };

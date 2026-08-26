@@ -45,15 +45,60 @@ const STAGES: Candidate["stage"][] = ["applied", "screening", "interview", "offe
 function RecruitmentPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
+  const [reqStatus, setReqStatus] = useState("open");
   const [open, setOpen] = useState(false); const [form, setForm] = useState({ title: "", departmentId: "", location: "", openings: "1" }); const queryClient = useQueryClient();
   const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
 
-  const openings = useQuery({ queryKey: ["openings"], queryFn: () => talentService.openings() });
+  const openings = useQuery({ queryKey: ["openings", reqStatus], queryFn: () => talentService.openings({ status: reqStatus }) });
+  const allOpenings = useQuery({ queryKey: ["openings", "all"], queryFn: () => talentService.openings({ status: "all" }) });
   const candidates = useQuery({
     queryKey: ["candidates", search, stage],
     queryFn: () => talentService.candidates({ search, status: stage }),
   });
   const create = useMutation({ mutationFn: () => { if (!form.title.trim()) throw new Error("Title is required."); const input = { title: form.title, location: form.location, openings: Math.max(1, Number(form.openings) || 1), employmentType: "full-time" }; return talentService.createOpening(form.departmentId ? { ...input, departmentId: form.departmentId } : input); }, onSuccess: () => { toast.success("Requisition created"); setOpen(false); setForm({ title: "", departmentId: "", location: "", openings: "1" }); void queryClient.invalidateQueries({ queryKey: ["openings"] }); }, onError: (e) => toast.error("Could not create requisition", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+
+  const closeRequisition = useMutation({
+    mutationFn: (id: string) => talentService.closeOpening(id),
+    onSuccess: () => {
+      toast.success("Requisition closed");
+      void queryClient.invalidateQueries({ queryKey: ["openings"] });
+    },
+    onError: (e) => toast.error("Could not close requisition", { description: e instanceof Error ? e.message : "Try again." }),
+  });
+
+  const [addCandidateJobId, setAddCandidateJobId] = useState<string | null>(null);
+  const [candidateForm, setCandidateForm] = useState({ name: "", email: "", phone: "", source: "", experienceYears: "" });
+  const addCandidate = useMutation({
+    mutationFn: () => {
+      if (!addCandidateJobId) throw new Error("No requisition selected.");
+      if (!candidateForm.name.trim()) throw new Error("Candidate name is required.");
+      return talentService.addCandidateApplication({
+        jobId: addCandidateJobId,
+        name: candidateForm.name,
+        email: candidateForm.email,
+        phone: candidateForm.phone,
+        source: candidateForm.source,
+        ...(candidateForm.experienceYears ? { experienceYears: Number(candidateForm.experienceYears) } : {}),
+      });
+    },
+    onSuccess: () => {
+      toast.success("Candidate added");
+      setAddCandidateJobId(null);
+      setCandidateForm({ name: "", email: "", phone: "", source: "", experienceYears: "" });
+      void queryClient.invalidateQueries({ queryKey: ["candidates"] });
+      void queryClient.invalidateQueries({ queryKey: ["openings"] });
+    },
+    onError: (e) => toast.error("Could not add candidate", { description: e instanceof Error ? e.message : "Try again." }),
+  });
+
+  const moveStage = useMutation({
+    mutationFn: (vars: { applicationId: string; stage: Candidate["stage"] }) =>
+      talentService.moveCandidateStage(vars.applicationId, vars.stage),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["candidates"] });
+    },
+    onError: (e) => toast.error("Could not update candidate stage", { description: e instanceof Error ? e.message : "Try again." }),
+  });
 
   const rows = candidates.data ?? [];
 
@@ -73,14 +118,14 @@ function RecruitmentPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Open roles"
-          value={String((openings.data ?? []).filter((j) => j.stage === "open").length)}
+          value={String((allOpenings.data ?? []).filter((j) => j.stage === "open").length)}
           icon={Briefcase}
           tone="primary"
           hint="actively hiring"
         />
         <StatCard
           label="Applicants"
-          value={String((openings.data ?? []).reduce((sum, j) => sum + j.applicants, 0))}
+          value={String((allOpenings.data ?? []).reduce((sum, j) => sum + j.applicants, 0))}
           icon={Users}
           tone="info"
           hint="all requisitions"
@@ -108,7 +153,23 @@ function RecruitmentPage() {
         />
       </div>
 
-      <SectionCard title="Open requisitions" description="Hiring manager and applicant volume" bodyClassName="p-0">
+      <SectionCard
+        title="Requisitions"
+        description="Hiring manager and applicant volume"
+        bodyClassName="p-0"
+        action={
+          <select
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            aria-label="Requisition status"
+            value={reqStatus}
+            onChange={(e) => setReqStatus(e.target.value)}
+          >
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+            <option value="all">All</option>
+          </select>
+        }
+      >
         {openings.isLoading ? (
           <div className="p-5">
             <CardsSkeleton count={2} />
@@ -127,9 +188,29 @@ function RecruitmentPage() {
                 <div className="flex shrink-0 items-center gap-3">
                   <span className="text-sm font-semibold">{job.applicants}</span>
                   <StatusBadge status={job.stage} />
+                  {job.stage === "open" ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => setAddCandidateJobId(job.id)}>
+                        Add candidate
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={closeRequisition.isPending}
+                        onClick={() => closeRequisition.mutate(job.id)}
+                      >
+                        Close
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
               </li>
             ))}
+            {(openings.data ?? []).length === 0 ? (
+              <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                No {reqStatus === "all" ? "" : reqStatus} requisitions found.
+              </li>
+            ) : null}
           </ul>
         )}
       </SectionCard>
@@ -174,12 +255,38 @@ function RecruitmentPage() {
                           {candidate.experience} · {candidate.source}
                         </span>
                         <span className="inline-flex shrink-0 items-center gap-0.5 font-semibold text-foreground">
-                          <Star className="size-3 text-warning" /> {candidate.rating}
+                          {candidate.rating != null ? (
+                            <>
+                              <Star className="size-3 text-warning" /> {candidate.rating}
+                            </>
+                          ) : (
+                            <span className="font-normal text-muted-foreground/70">Not rated</span>
+                          )}
                         </span>
                       </div>
                       <p className="mt-1 text-[11px] text-muted-foreground/80">
                         Applied {shortDate(candidate.appliedOn)}
                       </p>
+                      {candidate.applicationId ? (
+                        <select
+                          className="mt-2 h-8 w-full rounded-md border bg-background px-2 text-xs"
+                          aria-label={`Move ${candidate.name} to stage`}
+                          value={candidate.stage}
+                          disabled={moveStage.isPending}
+                          onChange={(e) =>
+                            moveStage.mutate({
+                              applicationId: candidate.applicationId as string,
+                              stage: e.target.value as Candidate["stage"],
+                            })
+                          }
+                        >
+                          {STAGES.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
                     </article>
                   ))}
                   {items.length === 0 ? (
@@ -191,6 +298,48 @@ function RecruitmentPage() {
           })}
         </div>
       </SectionCard>
+
+      <Dialog open={addCandidateJobId !== null} onOpenChange={(v) => !v && setAddCandidateJobId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add candidate</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label>Name</Label>
+              <Input value={candidateForm.name} onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Email</Label>
+                <Input type="email" value={candidateForm.email} onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })} />
+              </div>
+              <div>
+                <Label>Phone</Label>
+                <Input value={candidateForm.phone} onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Source</Label>
+                <Input placeholder="Referral, LinkedIn, …" value={candidateForm.source} onChange={(e) => setCandidateForm({ ...candidateForm, source: e.target.value })} />
+              </div>
+              <div>
+                <Label>Experience (yrs)</Label>
+                <Input type="number" min="0" value={candidateForm.experienceYears} onChange={(e) => setCandidateForm({ ...candidateForm, experienceYears: e.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddCandidateJobId(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => addCandidate.mutate()} disabled={addCandidate.isPending}>
+              {addCandidate.isPending ? "Saving…" : "Add candidate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

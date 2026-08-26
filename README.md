@@ -1,6 +1,6 @@
-# Kinetix HR Suite
+# TeamNest HR Suite
 
-Build a modern, professional and production-style HRMS web application called Kinetix using React + Vite + TypeScript.
+Build a modern, professional and production-style HRMS web application called TeamNest using React + Vite + TypeScript.
 
 This is a frontend-first application. The backend will be implemented separately using Supabase. Do not create a fake backend or hardcoded business logic.
 

@@ -596,7 +596,7 @@ export const payrollRuns: PayrollRun[] = [
     gross: 41250000,
     deductions: 6820000,
     net: 34430000,
-    status: "processing",
+    status: "processed",
     payDate: "2026-08-31",
   },
   {
@@ -606,7 +606,7 @@ export const payrollRuns: PayrollRun[] = [
     gross: 40510000,
     deductions: 6710000,
     net: 33800000,
-    status: "paid",
+    status: "approved",
     payDate: "2026-07-31",
   },
   {
@@ -616,7 +616,7 @@ export const payrollRuns: PayrollRun[] = [
     gross: 39880000,
     deductions: 6605000,
     net: 33275000,
-    status: "paid",
+    status: "approved",
     payDate: "2026-06-30",
   },
 ];
@@ -973,11 +973,11 @@ export const onboardingJourneys: OnboardingJourney[] = [
     buddy: "Rohit Verma",
     progress: 62,
     tasks: [
-      { label: "Offer accepted", owner: "Talent", done: true },
-      { label: "Background verification", owner: "HR Ops", done: true },
-      { label: "Laptop allocation", owner: "IT", done: true },
-      { label: "Payroll setup", owner: "Finance", done: false },
-      { label: "Day-1 orientation", owner: "HR", done: false },
+      { id: "o1t1", label: "Offer accepted", owner: "Talent", done: true },
+      { id: "o1t2", label: "Background verification", owner: "HR Ops", done: true },
+      { id: "o1t3", label: "Laptop allocation", owner: "IT", done: true },
+      { id: "o1t4", label: "Payroll setup", owner: "Finance", done: false },
+      { id: "o1t5", label: "Day-1 orientation", owner: "HR", done: false },
     ],
   },
   {
@@ -988,10 +988,10 @@ export const onboardingJourneys: OnboardingJourney[] = [
     buddy: "Sana Khan",
     progress: 25,
     tasks: [
-      { label: "Offer accepted", owner: "Talent", done: true },
-      { label: "Document collection", owner: "HR Ops", done: false },
-      { label: "Asset request raised", owner: "IT", done: false },
-      { label: "Team intro scheduled", owner: "Manager", done: false },
+      { id: "o2t1", label: "Offer accepted", owner: "Talent", done: true },
+      { id: "o2t2", label: "Document collection", owner: "HR Ops", done: false },
+      { id: "o2t3", label: "Asset request raised", owner: "IT", done: false },
+      { id: "o2t4", label: "Team intro scheduled", owner: "Manager", done: false },
     ],
   },
 ];
@@ -1310,7 +1310,6 @@ export const auditEntries: AuditEntry[] = [
     entity: "Payroll / August 2026",
     ip: "10.4.22.18",
     timestamp: "2026-08-17 14:02",
-    severity: "warning",
   },
   {
     id: "au2",
@@ -1319,7 +1318,6 @@ export const auditEntries: AuditEntry[] = [
     entity: "Attendance / Rohit Verma",
     ip: "10.4.19.7",
     timestamp: "2026-08-17 11:47",
-    severity: "info",
   },
   {
     id: "au3",
@@ -1328,7 +1326,6 @@ export const auditEntries: AuditEntry[] = [
     entity: "Auth / daniel.f@teamnest.example",
     ip: "103.21.44.9",
     timestamp: "2026-08-16 22:10",
-    severity: "critical",
   },
   {
     id: "au4",
@@ -1337,7 +1334,6 @@ export const auditEntries: AuditEntry[] = [
     entity: "Asset / PF-MB-0017",
     ip: "10.4.30.2",
     timestamp: "2026-08-12 09:33",
-    severity: "info",
   },
 ];
 

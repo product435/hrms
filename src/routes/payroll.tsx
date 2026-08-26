@@ -40,6 +40,31 @@ export const Route = createFileRoute("/payroll")({
 function PayrollPage() {
   const queryClient = useQueryClient();
   const startRun = useMutation({ mutationFn: () => { const now = new Date(); return payrollService.startRun({ year: now.getFullYear(), month: now.getMonth() + 1 }); }, onSuccess: () => { toast.success("Payroll run created"); void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] }); void queryClient.invalidateQueries({ queryKey: ["payslips"] }); }, onError: (e) => toast.error("Could not start payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+  const processRun = useMutation({
+    mutationFn: (runId: string) => payrollService.processRun(runId),
+    onSuccess: () => {
+      toast.success("Payroll run processed", { description: "Ready for approval." });
+      void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] });
+    },
+    onError: (e) => toast.error("Could not process payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
+  const approveRun = useMutation({
+    mutationFn: (runId: string) => payrollService.approveRun(runId),
+    onSuccess: () => {
+      toast.success("Payroll run approved", { description: "Payslips generated for all employees in this run." });
+      void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["payslips"] });
+    },
+    onError: (e) => toast.error("Could not approve payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
+  const rejectRun = useMutation({
+    mutationFn: (runId: string) => payrollService.rejectRun(runId),
+    onSuccess: () => {
+      toast.success("Payroll run rejected", { description: "Sent back to draft for correction." });
+      void queryClient.invalidateQueries({ queryKey: ["payroll-runs"] });
+    },
+    onError: (e) => toast.error("Could not reject payroll run", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
   const { role, user } = useSession();
   const isSelfService = role === "employee";
   const [search, setSearch] = useState("");
@@ -223,6 +248,34 @@ function PayrollPage() {
                     {shortDate(run.payDate)}
                   </span>
                   <StatusBadge status={run.status} />
+                  {run.status === "draft" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={processRun.isPending}
+                      onClick={() => processRun.mutate(run.id)}
+                    >
+                      {processRun.isPending ? "Processing…" : "Process"}
+                    </Button>
+                  ) : run.status === "processed" ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        disabled={approveRun.isPending || rejectRun.isPending}
+                        onClick={() => approveRun.mutate(run.id)}
+                      >
+                        {approveRun.isPending ? "Approving…" : "Approve"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={approveRun.isPending || rejectRun.isPending}
+                        onClick={() => rejectRun.mutate(run.id)}
+                      >
+                        {rejectRun.isPending ? "Rejecting…" : "Reject"}
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               </li>
             ))}

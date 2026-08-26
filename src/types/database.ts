@@ -177,6 +177,60 @@ export type Database = {
           },
         ]
       }
+      asset_requests: {
+        Row: {
+          category: string
+          details: string | null
+          employee_id: string
+          id: string
+          rejection_reason: string | null
+          requested_at: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          category: string
+          details?: string | null
+          employee_id: string
+          id?: string
+          rejection_reason?: string | null
+          requested_at?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          category?: string
+          details?: string | null
+          employee_id?: string
+          id?: string
+          rejection_reason?: string | null
+          requested_at?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_requests_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_requests_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       assets: {
         Row: {
           asset_code: string | null
@@ -2122,6 +2176,18 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_candidate_application: {
+        Args: {
+          p_email?: string
+          p_experience_years?: number
+          p_job_id: string
+          p_name: string
+          p_phone?: string
+          p_resume_url?: string
+          p_source?: string
+        }
+        Returns: string
+      }
       complete_password_reset_request: { Args: never; Returns: undefined }
       create_employee_complaint: {
         Args: {
@@ -2164,6 +2230,22 @@ export type Database = {
           is_admin_account: boolean
           request_id: string
         }[]
+      }
+      submit_manager_review: {
+        Args: {
+          p_feedback?: string
+          p_manager_rating: number
+          p_review_id: string
+        }
+        Returns: undefined
+      }
+      submit_self_review: {
+        Args: {
+          p_feedback?: string
+          p_review_id: string
+          p_self_rating: number
+        }
+        Returns: undefined
       }
     }
     Enums: {

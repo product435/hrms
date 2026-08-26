@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { workplaceService } from "@/services/workplaceService";
 import type { AuditEntry } from "@/types";
@@ -22,11 +21,10 @@ export const Route = createFileRoute("/audit")({
 
 function AuditPage() {
   const [search, setSearch] = useState("");
-  const [severity, setSeverity] = useState("all");
 
   const audit = useQuery({
-    queryKey: ["audit", search, severity],
-    queryFn: () => workplaceService.auditTrail({ search, status: severity }),
+    queryKey: ["audit", search],
+    queryFn: () => workplaceService.auditTrail({ search }),
   });
 
   const columns = useMemo<Column<AuditEntry>[]>(
@@ -56,16 +54,6 @@ function AuditPage() {
         header: "IP",
         cell: (row) => row.ip,
       },
-      {
-        key: "severity",
-        header: "Severity",
-        cell: (row) => (
-          <StatusBadge
-            status={row.severity}
-            tone={row.severity === "critical" ? "danger" : row.severity === "warning" ? "warning" : "neutral"}
-          />
-        ),
-      },
     ],
     [],
   );
@@ -82,15 +70,6 @@ function AuditPage() {
         search={search}
         onSearchChange={setSearch}
         searchPlaceholder="Search by actor, action or entity…"
-        status={severity}
-        onStatusChange={setSeverity}
-        statusLabel="Severity"
-        statusOptions={[
-          { value: "all", label: "All severities" },
-          { value: "info", label: "Info" },
-          { value: "warning", label: "Warning" },
-          { value: "critical", label: "Critical" },
-        ]}
       />
 
       {audit.isLoading ? (

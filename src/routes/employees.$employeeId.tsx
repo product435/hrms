@@ -313,7 +313,7 @@ function EmployeeDetailPage() {
         actions={
           <>
             <StatusBadge status={emp.status} />
-            {canManage ? (
+            {canManage || isOwnProfile ? (
               <Button variant="outline" onClick={openEdit}>
                 Edit profile
               </Button>
@@ -687,34 +687,43 @@ function EmployeeDetailPage() {
                 />
               </div>
             ))}
-            <div className="space-y-1">
-              <Label>Employment type</Label>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={editForm.employmentType}
-                onChange={(event) => setEditForm({ ...editForm, employmentType: event.target.value })}
-              >
-                <option value="full-time">Full-time</option>
-                <option value="part-time">Part-time</option>
-                <option value="contract">Contract</option>
-                <option value="intern">Intern</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <Label>Status</Label>
-              <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={editForm.status}
-                onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}
-              >
-                <option value="active">Active</option>
-                <option value="probation">Probation</option>
-                <option value="notice">Notice period</option>
-                <option value="on-leave">On leave</option>
-                <option value="resigned">Resigned</option>
-              </select>
-            </div>
+            {canManage ? (
+              <>
+                <div className="space-y-1">
+                  <Label>Employment type</Label>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={editForm.employmentType}
+                    onChange={(event) => setEditForm({ ...editForm, employmentType: event.target.value })}
+                  >
+                    <option value="full-time">Full-time</option>
+                    <option value="part-time">Part-time</option>
+                    <option value="contract">Contract</option>
+                    <option value="intern">Intern</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Status</Label>
+                  <select
+                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                    value={editForm.status}
+                    onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}
+                  >
+                    <option value="active">Active</option>
+                    <option value="probation">Probation</option>
+                    <option value="notice">Notice period</option>
+                    <option value="on-leave">On leave</option>
+                    <option value="resigned">Resigned</option>
+                  </select>
+                </div>
+              </>
+            ) : null}
           </div>
+          {!canManage ? (
+            <p className="text-xs text-muted-foreground">
+              Employment type and status are managed by HR/Admin.
+            </p>
+          ) : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel

@@ -10,15 +10,32 @@ import {
   tickets as fixtureTickets,
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { fromFixture } from "./api";
+import { fromFixture, requireOrganizationId } from "./api";
 import { displayName, normalizeKey } from "@/lib/normalize";
+
+// "YYYY-MM" for the given date, used as the month bucket key throughout this
+// file.
+function monthLabel(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// Adds `delta` calendar months to a "YYYY-MM" label (delta may be negative).
+function addMonths(label: string, delta: number): string {
+  const year = Number(label.slice(0, 4));
+  const month = Number(label.slice(5, 7));
+  return monthLabel(new Date(Date.UTC(year, month - 1 + delta, 1)));
+}
 export interface CompanySummary {
   headcount: number;
   presentToday: number;
   onLeaveToday: number;
   wfhToday: number;
   lateToday: number;
-  attritionRate: number;
+  // The schema has no exit-date column on employees -- employment_status
+  // records THAT someone resigned, not WHEN, so a real (time-bounded)
+  // attrition rate can't be computed. null means "not determinable from the
+  // current schema", not zero attrition -- the UI must render this as N/A.
+  attritionRate: number | null;
   openPositions: number;
   pendingApprovals: number;
   payrollNet: number;
@@ -26,7 +43,7 @@ export interface CompanySummary {
   assetsAssigned: number;
   assetsInRepair: number;
   openTickets: number;
-  avgTenureYears: number;
+  avgTenureYears: number | null;
 }
 export const insightsService = {
   async companySummary(): Promise<CompanySummary> {
@@ -59,6 +76,7 @@ export const insightsService = {
       { data: latestRun },
       { data: assets },
       { data: tickets },
+      { data: activeJoiningDates },
     ] = await Promise.all([
       supabase
         .from("employees")
@@ -76,7 +94,15 @@ export const insightsService = {
         .maybeSingle(),
       supabase.from("assets").select("status"),
       supabase.from("helpdesk_tickets").select("status"),
+      supabase.from("employees").select("joining_date").neq("employment_status", "resigned"),
     ]);
+    const tenureYears = (activeJoiningDates ?? [])
+      .map((r) => r.joining_date)
+      .filter((d): d is string => Boolean(d))
+      .map((d) => (Date.now() - new Date(d).getTime()) / (365.25 * 86400000));
+    const avgTenureYears = tenureYears.length
+      ? Number((tenureYears.reduce((sum, y) => sum + y, 0) / tenureYears.length).toFixed(1))
+      : null;
     const payrollNet = latestRun
       ? await supabase
           .from("payroll_records")
@@ -92,7 +118,7 @@ export const insightsService = {
       ).length,
       wfhToday: (att ?? []).filter((r) => r.status === "wfh").length,
       lateToday: (att ?? []).filter((r) => r.status === "late").length,
-      attritionRate: 0,
+      attritionRate: null,
       openPositions: (jobs ?? []).length,
       pendingApprovals: (leaves ?? []).filter((r) => r.status === "pending").length,
       payrollNet,
@@ -101,7 +127,7 @@ export const insightsService = {
       assetsInRepair: (assets ?? []).filter((r) => r.status === "in-repair").length,
       openTickets: (tickets ?? []).filter((r) => !["closed", "resolved"].includes(r.status ?? ""))
         .length,
-      avgTenureYears: 0,
+      avgTenureYears,
     };
   },
   async attendanceTrend() {
@@ -127,26 +153,67 @@ export const insightsService = {
     });
     return [...grouped.values()];
   },
-  async headcountTrend() {
+  // `month` is an optional "YYYY-MM" label. When omitted, returns the
+  // trailing six calendar months (ending at the current month). When given,
+  // returns that single month's real joined/exited counts and its running
+  // headcount as of that month.
+  async headcountTrend(month?: string) {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureHeadcount);
-    const { data, error } = await supabase.from("employees").select("joining_date,employment_status");
+    const organizationId = await requireOrganizationId();
+    const { data, error } = await supabase
+      .from("employees")
+      .select("joining_date,employment_status,updated_at")
+      .eq("organization_id", organizationId);
     if (error) throw error;
     const byMonth = new Map<string, { joined: number; exited: number }>();
-    (data ?? []).forEach((r) => {
-      if (!r.joining_date) return;
-      const label = r.joining_date.slice(0, 7);
+    const bump = (label: string, key: "joined" | "exited") => {
       const point = byMonth.get(label) ?? { joined: 0, exited: 0 };
-      point.joined += 1;
-      if (r.employment_status === "resigned") point.exited += 1;
+      point[key] += 1;
       byMonth.set(label, point);
+    };
+    (data ?? []).forEach((r) => {
+      // A joiner is bucketed by their real joining_date, independent of
+      // whether they've since resigned -- they still genuinely joined that
+      // month.
+      if (r.joining_date) bump(r.joining_date.slice(0, 7), "joined");
+      // employees has no dedicated exit/termination-date column -- updated_at
+      // is the closest real, existing signal for when a resignation was
+      // recorded (the set_updated_at trigger bumps it whenever
+      // employment_status is changed to "resigned"). Previously this bucketed
+      // exits into the employee's *joining* month instead, which is wrong
+      // for anyone who resigned in a different month than they joined.
+      if (r.employment_status === "resigned" && r.updated_at) bump(r.updated_at.slice(0, 7), "exited");
     });
+    const currentLabel = monthLabel(new Date());
+    const trailingWindowStart = addMonths(currentLabel, -5);
+    const dataLabels = [...byMonth.keys()].sort((a, b) => a.localeCompare(b));
+    // Walk a continuous calendar sequence (not just months that happen to
+    // have data) so months with zero joiners/exits still render as a real
+    // zero bar instead of silently disappearing from "Last 6 Months", and so
+    // the running headcount never skips a month. The sequence always covers
+    // at least the trailing 6-month display window, and starts earlier still
+    // if real data goes back further, so the running total accumulates from
+    // the true start of history.
+    const earliestDataLabel = dataLabels[0];
+    const earliestLabel = earliestDataLabel && earliestDataLabel < trailingWindowStart ? earliestDataLabel : trailingWindowStart;
+    const allLabels: string[] = [];
+    for (let label = earliestLabel; label <= currentLabel; label = addMonths(label, 1)) {
+      allLabels.push(label);
+    }
     let running = 0;
-    return [...byMonth.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([label, point]) => {
-        running += point.joined - point.exited;
-        return { label, joined: point.joined, exited: point.exited, headcount: running };
-      });
+    const allPoints = allLabels.map((label) => {
+      const point = byMonth.get(label) ?? { joined: 0, exited: 0 };
+      running += point.joined - point.exited;
+      return { label, joined: point.joined, exited: point.exited, headcount: running };
+    });
+    if (month) {
+      const found = allPoints.find((p) => p.label === month);
+      // A selected month before any employee existed genuinely had zero
+      // headcount and zero movement -- not missing data.
+      return found ? [found] : [{ label: month, joined: 0, exited: 0, headcount: 0 }];
+    }
+    // Matches the "Last 6 Months" default on the Dashboard card.
+    return allPoints.slice(-6);
   },
   async departmentDistribution(managerId?: string) {
     if (!isSupabaseConfigured || !supabase)
@@ -157,16 +224,26 @@ export const insightsService = {
           openRoles: d.openRoles,
         })),
       );
+    // authenticated user -> organization context -> departments.organization_id
+    // -> departments.id/name -> employees.department_id. RLS already scopes
+    // both tables to the caller's own organization, but the filter is made
+    // explicit here too so the query itself (not just the policy) reflects
+    // that data flow.
+    const organizationId = await requireOrganizationId();
     const [{ data: departments, error: departmentError }, { data: employees, error: employeeError }] = await Promise.all([
-      supabase.from("departments").select("id,name"),
+      supabase.from("departments").select("id,name").eq("organization_id", organizationId),
       managerId
-        ? supabase.from("employees").select("department_id").eq("manager_id", managerId)
-        : supabase.from("employees").select("department_id"),
+        ? supabase.from("employees").select("department_id").eq("organization_id", organizationId).eq("manager_id", managerId)
+        : supabase.from("employees").select("department_id").eq("organization_id", organizationId),
     ]);
     if (departmentError) throw departmentError;
     if (employeeError) throw employeeError;
     const counts = new Map<string, number>();
-    (employees ?? []).forEach((employee) => { if (employee.department_id) counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1); });
+    let unassigned = 0;
+    (employees ?? []).forEach((employee) => {
+      if (employee.department_id) counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1);
+      else unassigned += 1;
+    });
     // Same normalized-name aggregation as employeeService.departments(), so
     // duplicate department rows (e.g. "QA", "QA ") show as one chart segment
     // with a combined headcount here too, on both Dashboard and Reports.
@@ -178,6 +255,13 @@ export const insightsService = {
       if (existing) existing.value += value;
       else grouped.set(key, { name: d.name ? displayName(d.name) : "Unassigned", value });
     });
+    // Employees with no department_id at all (never grouped into a real
+    // department -- shown as their own explicit segment, not hidden).
+    if (unassigned > 0) {
+      const existing = grouped.get("unassigned");
+      if (existing) existing.value += unassigned;
+      else grouped.set("unassigned", { name: "Unassigned", value: unassigned });
+    }
     return [...grouped.values()].map((g) => ({ ...g, openRoles: 0 }));
   },
   async leaveMix() {

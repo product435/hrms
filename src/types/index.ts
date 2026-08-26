@@ -122,7 +122,7 @@ export interface PayrollRun {
   gross: number;
   deductions: number;
   net: number;
-  status: "draft" | "processing" | "paid" | "on-hold";
+  status: "draft" | "processed" | "approved";
   payDate: string;
 }
 
@@ -180,6 +180,21 @@ export interface AssetEvent {
   note: string;
 }
 
+export type AssetRequestStatus = "pending" | "approved" | "rejected";
+
+export interface AssetRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  category: AssetCategory;
+  details: string;
+  status: AssetRequestStatus;
+  reviewedByName: string;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  requestedAt: string;
+}
+
 export interface JobOpening {
   id: string;
   title: string;
@@ -195,12 +210,15 @@ export interface JobOpening {
 
 export interface Candidate {
   id: string;
+  applicationId?: string | null;
   name: string;
   role: string;
   stage: "applied" | "screening" | "interview" | "offer" | "hired" | "rejected";
   experience: string;
   source: string;
-  rating: number;
+  // No rating column exists on candidates or job_applications -- null means
+  // "not rated", never a fabricated 0.
+  rating: number | null;
   appliedOn: string;
 }
 
@@ -211,13 +229,16 @@ export interface OnboardingJourney {
   startDate: string;
   buddy: string;
   progress: number;
-  tasks: { label: string; owner: string; done: boolean }[];
+  tasks: { id: string; label: string; owner: string; done: boolean }[];
 }
 
 export interface Goal {
   id: string;
+  employeeId?: string;
   employeeName: string;
   title: string;
+  description?: string;
+  target?: string;
   category: "Business" | "Learning" | "Team" | "Quality";
   progress: number;
   weight: number;
@@ -227,12 +248,14 @@ export interface Goal {
 
 export interface PerformanceReview {
   id: string;
+  employeeId?: string;
   employeeName: string;
   cycle: string;
   reviewer: string;
-  selfScore: number;
-  managerScore: number;
-  finalRating: number;
+  // null means not yet submitted -- distinct from a genuine 0 rating.
+  selfScore: number | null;
+  managerScore: number | null;
+  finalRating: number | null;
   status: "not-started" | "in-progress" | "submitted" | "closed" | "completed";
 }
 
@@ -245,6 +268,7 @@ export interface DocumentItem {
   uploadedOn: string;
   expiresOn: string | null;
   verified: boolean;
+  filePath?: string;
 }
 
 export interface ExpenseClaim {
@@ -266,6 +290,7 @@ export interface HelpdeskTicket {
   status: "open" | "in-progress" | "resolved" | "closed";
   createdOn: string;
   assignee: string;
+  assignedTo?: string | null;
 }
 
 export interface Announcement {
@@ -331,7 +356,6 @@ export interface AuditEntry {
   entity: string;
   ip: string;
   timestamp: string;
-  severity: "info" | "warning" | "critical";
 }
 
 export interface TrendPoint {

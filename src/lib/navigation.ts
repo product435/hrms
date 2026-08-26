@@ -42,8 +42,8 @@ export const navSections: NavSection[] = [
     title: "Overview",
     items: [
       { label: "Dashboard", to: "/", icon: Gauge, roles: ALL },
-      { label: "Announcements", to: "/announcements", icon: Megaphone, roles: [] },
-      { label: "Notifications", to: "/notifications", icon: Bell, roles: [] },
+      { label: "Announcements", to: "/announcements", icon: Megaphone, roles: ALL },
+      { label: "Notifications", to: "/notifications", icon: Bell, roles: ALL },
     ],
   },
   {
@@ -67,7 +67,7 @@ export const navSections: NavSection[] = [
         icon: BriefcaseBusiness,
         roles: ["admin"],
       },
-      { label: "Onboarding", to: "/onboarding", icon: UserPlus, roles: [] },
+      { label: "Onboarding", to: "/onboarding", icon: UserPlus, roles: ["admin", "hr"] },
       { label: "Recruitment", to: "/recruitment", icon: Briefcase, roles: ["admin", "hr"] },
     ],
   },
@@ -75,7 +75,7 @@ export const navSections: NavSection[] = [
     title: "Time & Attendance",
     items: [
       { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: ALL },
-      { label: "Shifts", to: "/shifts", icon: CalendarClock, roles: [] },
+      { label: "Shifts", to: "/shifts", icon: CalendarClock, roles: ["admin", "hr", "manager"] },
       { label: "Leave", to: "/leave", icon: ClipboardList, roles: ALL },
     ],
   },
@@ -83,29 +83,29 @@ export const navSections: NavSection[] = [
     title: "Compensation",
     items: [
       { label: "Payroll", to: "/payroll", icon: BadgeIndianRupee, roles: ["admin", "hr", "employee"] },
-      { label: "Expenses", to: "/expenses", icon: Receipt, roles: [] },
+      { label: "Expenses", to: "/expenses", icon: Receipt, roles: ALL },
     ],
   },
   {
     title: "Growth",
     items: [
       { label: "Goals", to: "/goals", icon: Target, roles: ["manager", "employee"] },
-      { label: "Performance", to: "/performance", icon: ChartBar, roles: ["admin", "manager"] },
+      { label: "Performance", to: "/performance", icon: ChartBar, roles: ["admin", "hr", "manager", "employee"] },
     ],
   },
   {
     title: "Workplace",
     items: [
       { label: "Assets", to: "/assets", icon: LaptopMinimal, roles: ["admin", "employee"] },
-      { label: "Documents", to: "/documents", icon: FileText, roles: ["hr", "employee"] },
-      { label: "HR Helpdesk", to: "/helpdesk", icon: LifeBuoy, roles: [] },
+      { label: "Documents", to: "/documents", icon: FileText, roles: ["admin", "hr", "manager", "employee"] },
+      { label: "HR Helpdesk", to: "/helpdesk", icon: LifeBuoy, roles: ALL },
     ],
   },
   {
     title: "Administration",
     items: [
       { label: "Reports & Analytics", to: "/reports", icon: ChartBar, roles: ["admin", "hr"] },
-      { label: "Activity History", to: "/audit", icon: Activity, roles: [] },
+      { label: "Activity History", to: "/audit", icon: Activity, roles: ["admin", "hr"] },
       { label: "Settings", to: "/settings", icon: Settings, roles: ["admin", "manager"] },
     ],
   },
@@ -128,6 +128,7 @@ export const employeeLabelOverrides: Record<string, string> = {
   "/assets": "My Assets",
   "/documents": "My Documents",
   "/goals": "My Goals",
+  "/performance": "My Performance",
   "/expenses": "My Expenses",
   "/helpdesk": "My Requests",
 };
@@ -135,4 +136,5 @@ export const employeeLabelOverrides: Record<string, string> = {
 export const managerLabelOverrides: Record<string, string> = {
   "/employees": "My Team",
   "/leave": "Leave approvals",
+  "/documents": "Team Documents",
 };

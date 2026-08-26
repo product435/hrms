@@ -45,7 +45,13 @@ export function DistributionDonut({
           itemStyle={{ color: "var(--color-popover-foreground)" }}
           cursor={{ fill: "var(--color-primary)", fillOpacity: 0.08 }}
         />
-        <Legend wrapperStyle={{ color: "var(--color-muted-foreground)", fontSize: 12 }} />
+        <Legend
+          wrapperStyle={{ color: "var(--color-muted-foreground)", fontSize: 12, paddingTop: 8 }}
+          formatter={(name: string) => {
+            const entry = data.find((d) => d.name === name);
+            return `${name} (${entry?.value ?? 0})`;
+          }}
+        />
       </PieChart>
     </ResponsiveContainer>
   );

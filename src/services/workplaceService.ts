@@ -15,7 +15,7 @@ import type {
   HelpdeskTicket,
   NotificationItem,
 } from "@/types";
-import { currentUserId, fromFixture, matchesSearch, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
 const mapDocument = (r: any): DocumentItem => ({
   id: r.id,
   name: r.title,
@@ -26,6 +26,10 @@ const mapDocument = (r: any): DocumentItem => ({
   expiresOn: r.expiry_date,
   // No verification/review flag exists on the documents table.
   verified: false,
+  // Storage object path (documents bucket), not a URL -- the bucket is
+  // private, so View/Open exchanges this for a short-lived signed URL
+  // on demand rather than storing/exposing a public link.
+  ...(r.file_url ? { filePath: r.file_url as string } : {}),
 });
 const mapExpense = (r: any): ExpenseClaim => ({
   id: r.id,
@@ -45,6 +49,7 @@ const mapTicket = (r: any): HelpdeskTicket => ({
   status: r.status,
   createdOn: r.created_at,
   assignee: r.assignee?.full_name ?? "Unassigned",
+  assignedTo: r.assigned_to ?? null,
 });
 const mapAnnouncement = (r: any): Announcement => ({
   id: r.id,
@@ -93,6 +98,17 @@ export const workplaceService = {
     if (error) throw error;
     return (data ?? []).map(mapDocument);
   },
+  // The documents bucket is private -- View/Open exchanges the stored object
+  // path for a short-lived signed URL on demand (subject to the same
+  // storage.objects RLS as everything else here) rather than ever minting or
+  // storing a public link.
+  async getDocumentUrl(filePath: string): Promise<string> {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase.storage.from("documents").createSignedUrl(filePath, 120);
+    if (error) throw error;
+    if (!data?.signedUrl) throw new Error("Could not generate a link for this document.");
+    return data.signedUrl;
+  },
   async uploadDocument(file: File, employeeId: string, category = "Other") {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const path = `${employeeId}/${crypto.randomUUID()}-${file.name}`;
@@ -131,12 +147,119 @@ export const workplaceService = {
       .from("expense_claims")
       .select("*, employees(first_name,last_name)")
       .order("expense_date", { ascending: false });
+    if (options.employeeId) query = query.eq("employee_id", options.employeeId);
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
       .map(mapExpense)
       .filter((e) => matchesSearch([e.employeeName, e.category, e.note], options.search));
+  },
+  async createExpenseClaim(input: { category: string; amount: number; date: string; note?: string }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const employeeId = await requireEmployeeId();
+    const { data, error } = await supabase
+      .from("expense_claims")
+      .insert({
+        employee_id: employeeId,
+        category: input.category,
+        amount: input.amount,
+        expense_date: input.date,
+        description: input.note?.trim() || null,
+        status: "pending",
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async decideExpenseClaim(id: string, decision: "approved" | "rejected", rejectionReason?: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const approverId = await currentUserId();
+    const { error } = await supabase
+      .from("expense_claims")
+      .update({
+        status: decision,
+        ...(approverId ? { approved_by: approverId } : {}),
+        approved_at: new Date().toISOString(),
+        ...(decision === "rejected" ? { rejection_reason: rejectionReason?.trim() || null } : {}),
+      })
+      .eq("id", id);
+    if (error) throw error;
+  },
+  // Reimbursement is the one status the existing UI already promises (the
+  // page copy says "review, approve and reimburse", and the status filter
+  // already lists "Reimbursed") but had no action to actually reach --
+  // status is free text with no separate paid/payment-date column, so this
+  // is just the same shape as decideExpenseClaim for the one missing value.
+  async markExpenseReimbursed(id: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from("expense_claims").update({ status: "reimbursed" }).eq("id", id);
+    if (error) throw error;
+  },
+  async createTicket(input: { subject: string; category: string; priority: string; description?: string }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const employeeId = await requireEmployeeId();
+    const { data, error } = await supabase
+      .from("helpdesk_tickets")
+      .insert({
+        employee_id: employeeId,
+        subject: input.subject.trim(),
+        category: input.category,
+        priority: input.priority,
+        description: input.description?.trim() || null,
+        status: "open",
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async updateTicketStatus(id: string, status: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase
+      .from("helpdesk_tickets")
+      .update({ status, ...(status === "resolved" || status === "closed" ? { resolved_at: new Date().toISOString() } : {}) })
+      .eq("id", id);
+    if (error) throw error;
+  },
+  async updateTicketAssignee(id: string, assignedTo: string | null) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from("helpdesk_tickets").update({ assigned_to: assignedTo }).eq("id", id);
+    if (error) throw error;
+  },
+  // Assignee options for helpdesk tickets: assigned_to references profiles,
+  // not employees, so this reads profiles directly (role-filtered to
+  // admin/hr) rather than reusing employeeService, whose ids don't match.
+  async supportStaff(): Promise<{ id: string; name: string }[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .in("role", ["admin", "hr"])
+      .order("full_name");
+    if (error) throw error;
+    return (data ?? []).map((p) => ({ id: p.id, name: (p.full_name ?? "").trim() || "Unnamed" }));
+  },
+  async createAnnouncement(input: { title: string; content: string; priority: string }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const organizationId = await requireOrganizationId();
+    const publishedBy = await currentUserId();
+    const { data, error } = await supabase
+      .from("announcements")
+      .insert({
+        organization_id: organizationId,
+        title: input.title.trim(),
+        content: input.content.trim(),
+        priority: input.priority,
+        ...(publishedBy ? { published_by: publishedBy } : {}),
+        published_at: new Date().toISOString(),
+        is_active: true,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data;
   },
   async tickets(options: QueryOptions = {}): Promise<HelpdeskTicket[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -188,15 +311,10 @@ export const workplaceService = {
   async auditTrail(options: QueryOptions = {}): Promise<AuditEntry[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
-        fixtureAudit.filter(
-          (a) =>
-            matchesSearch([a.actor, a.action, a.entity], options.search) &&
-            (!options.status || options.status === "all" || a.severity === options.status),
-        ),
+        fixtureAudit.filter((a) => matchesSearch([a.actor, a.action, a.entity], options.search)),
       );
-    // audit_logs has no severity column in this schema, so severity filtering
-    // is a no-op here (kept as "info" for every row) rather than querying a
-    // column that doesn't exist.
+    // audit_logs has no severity column in this schema -- there is no real
+    // severity dimension to filter or display, so none is fabricated here.
     const { data, error } = await supabase
       .from("audit_logs")
       .select("*, actor:user_id(full_name)")
@@ -210,12 +328,7 @@ export const workplaceService = {
         entity: r.entity_type ?? "",
         ip: typeof r.ip_address === "string" ? r.ip_address : "",
         timestamp: r.created_at ?? "",
-        severity: "info" as const,
       }))
-      .filter(
-        (a) =>
-          matchesSearch([a.actor, a.action, a.entity], options.search) &&
-          (!options.status || options.status === "all" || a.severity === options.status),
-      );
+      .filter((a) => matchesSearch([a.actor, a.action, a.entity], options.search));
   },
 };

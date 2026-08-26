@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -69,11 +70,32 @@ function DashboardPage() {
   );
 }
 
+// Trailing 12 real calendar months (most recent first), generated from
+// today's date -- never a hardcoded list -- for the "Joiners vs exits" month
+// selector.
+function recentMonthOptions(count = 12): string[] {
+  const now = new Date();
+  return Array.from({ length: count }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function monthOptionLabel(label: string): string {
+  const year = Number(label.slice(0, 4));
+  const month = Number(label.slice(5, 7));
+  return new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
 function OrgDashboard() {
   const { user, role } = useSession();
+  const [headcountMonth, setHeadcountMonth] = useState("");
   const summary = useQuery({ queryKey: ["summary"], queryFn: () => insightsService.companySummary() });
   const trend = useQuery({ queryKey: ["attendance-trend"], queryFn: () => insightsService.attendanceTrend() });
-  const headcount = useQuery({ queryKey: ["headcount-trend"], queryFn: () => insightsService.headcountTrend() });
+  const headcount = useQuery({
+    queryKey: ["headcount-trend", headcountMonth],
+    queryFn: () => insightsService.headcountTrend(headcountMonth || undefined),
+  });
   const distribution = useQuery({ queryKey: ["dept-distribution", role, user.employeeId], queryFn: () => insightsService.departmentDistribution(role === "manager" ? user.employeeId : undefined) });
   // RLS returns a manager's own pending request alongside their team's
   // (leave_requests_self_select OR leave_requests_manager_view_team), but a
@@ -172,7 +194,25 @@ function OrgDashboard() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Joiners vs exits" description="Rolling six months">
+        <SectionCard
+          title="Joiners vs exits"
+          description={headcountMonth ? monthOptionLabel(headcountMonth) : "Last 6 Months"}
+          action={
+            <select
+              aria-label="Joiners vs exits range"
+              className="h-9 rounded-md border bg-background px-3 text-sm"
+              value={headcountMonth}
+              onChange={(e) => setHeadcountMonth(e.target.value)}
+            >
+              <option value="">Last 6 Months</option>
+              {recentMonthOptions().map((m) => (
+                <option key={m} value={m}>
+                  {monthOptionLabel(m)}
+                </option>
+              ))}
+            </select>
+          }
+        >
           {headcount.data ? <HeadcountBarChart data={headcount.data} /> : <div className="h-[260px]" />}
         </SectionCard>
 
@@ -257,8 +297,8 @@ function OrgDashboard() {
           <HealthRow
             icon={TrendingDown}
             label="Attrition"
-            value={`${s?.attritionRate ?? 0}%`}
-            note={`avg tenure ${s?.avgTenureYears ?? 0} yrs`}
+            value={s?.attritionRate != null ? `${s.attritionRate}%` : "N/A"}
+            note={s?.avgTenureYears != null ? `avg tenure ${s.avgTenureYears} yrs` : "avg tenure N/A"}
           />
         </SectionCard>
 

@@ -6,7 +6,7 @@ import {
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { AttendanceCorrection, AttendanceRecord, Shift, TrendPoint } from "@/types";
-import { fromFixture, matchesSearch, requireEmployeeId, type QueryOptions } from "./api";
+import { fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
 
 function mapAttendance(row: any): AttendanceRecord {
     return {
@@ -170,6 +170,33 @@ export const attendanceService = {
     const { data, error } = await supabase.from("shifts").select("*").order("name");
     if (error) throw error;
     return (data ?? []).map(mapShift);
+  },
+  async createShift(input: {
+    name: string;
+    startTime: string;
+    endTime: string;
+    breakMinutes: number;
+    graceMinutes: number;
+    isOvernight: boolean;
+  }) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const organizationId = await requireOrganizationId();
+    const { data, error } = await supabase
+      .from("shifts")
+      .insert({
+        organization_id: organizationId,
+        name: input.name.trim(),
+        start_time: input.startTime,
+        end_time: input.endTime,
+        break_minutes: input.breakMinutes,
+        grace_minutes: input.graceMinutes,
+        is_overnight: input.isOvernight,
+        is_active: true,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    return data;
   },
   async weeklyTrend(employeeId?: string): Promise<TrendPoint[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureTrend);
