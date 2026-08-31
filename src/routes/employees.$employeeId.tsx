@@ -110,6 +110,7 @@ function EmployeeDetailPage() {
     workLocation: "",
     employmentType: "full-time",
     status: "active",
+    exitDate: "",
   });
   const openEdit = () => {
     if (!emp) return;
@@ -124,6 +125,7 @@ function EmployeeDetailPage() {
       workLocation: emp.location,
       employmentType: emp.employmentType,
       status: emp.status,
+      exitDate: emp.exitDate ?? "",
     });
     setEditOpen(true);
   };
@@ -716,6 +718,19 @@ function EmployeeDetailPage() {
                     <option value="resigned">Resigned</option>
                   </select>
                 </div>
+                {editForm.status === "resigned" ? (
+                  <div className="space-y-1">
+                    <Label>Exit date</Label>
+                    <Input
+                      type="date"
+                      value={editForm.exitDate}
+                      onChange={(event) => setEditForm({ ...editForm, exitDate: event.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Used for Joiners vs exits and attrition reporting on the Dashboard.
+                    </p>
+                  </div>
+                ) : null}
               </>
             ) : null}
           </div>

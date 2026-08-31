@@ -98,3 +98,29 @@ export function ensureSupabase() {
   }
   return supabase;
 }
+
+// Best-effort audit trail write via the log_audit_event RPC (audit_logs has
+// no direct INSERT policy -- organization_id/user_id are resolved
+// server-side from the caller's own session, never trusted from the
+// client). Never throws: a failed audit write must not block the real
+// mutation it's describing.
+export async function logAudit(
+  action: string,
+  entityType: string,
+  entityId?: string | null,
+  oldData?: Record<string, unknown> | null,
+  newData?: Record<string, unknown> | null,
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  try {
+    await supabase.rpc("log_audit_event", {
+      p_action: action,
+      p_entity_type: entityType,
+      ...(entityId ? { p_entity_id: entityId } : {}),
+      ...(oldData ? { p_old_data: oldData as never } : {}),
+      ...(newData ? { p_new_data: newData as never } : {}),
+    });
+  } catch {
+    // Best-effort only.
+  }
+}

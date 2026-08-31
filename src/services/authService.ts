@@ -2,6 +2,7 @@ import { isSupabaseConfigured, supabase, type SupabaseClientLike } from "@/lib/s
 import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { Role, SessionUser } from "@/types";
 import { isValidEmail, sanitizeEmail } from "@/lib/email";
+import { logAudit } from "./api";
 
 // Supabase auth errors carry a machine-readable `code` in current supabase-js
 // versions, but that's not guaranteed across every version/error path, so
@@ -271,6 +272,7 @@ export const authService = {
         },
       };
     }
+    void logAudit("auth_sign_in", "profiles", data.user.id);
     return {};
   },
   async signUp(
@@ -343,6 +345,9 @@ export const authService = {
     return error ? { error: { message: error.message } } : { success: true };
   },
   async signOut() {
+    // Logged before the JWT is invalidated below -- current_org_id() inside
+    // the RPC needs the still-live session to resolve who/which org this is.
+    await logAudit("auth_sign_out", "profiles");
     writeSession(null);
     if (supabase) {
       try {

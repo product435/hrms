@@ -1,7 +1,7 @@
 import { assetEvents as fixtureEvents, assets as fixtureAssets } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Asset, AssetEvent, AssetRequest } from "@/types";
-import { currentUserId, fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, logAudit, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
 const mapAssetRequest = (r: any): AssetRequest => ({
   id: r.id,
   employeeId: r.employee_id,
@@ -185,6 +185,7 @@ export const assetService = {
       .select()
       .single();
     if (error) throw error;
+    void logAudit("asset_assign", "assets", asset.id, null, { tag, employee_id: employeeId });
     return data;
   },
   async markReturned(tag: string) {
@@ -197,6 +198,7 @@ export const assetService = {
       .select()
       .single();
     if (error) throw error;
+    void logAudit("asset_return", "assets", data.id, null, { tag, status: "available" });
     return data;
   },
   async sendForRepair(tag: string, note: string) {
@@ -209,6 +211,7 @@ export const assetService = {
       .select()
       .single();
     if (error) throw error;
+    void logAudit("asset_repair", "assets", data.id, null, { tag, status: "in-repair" });
     return data;
   },
   // Employee-initiated ask for a new asset. Deliberately not the same thing
@@ -263,5 +266,6 @@ export const assetService = {
       })
       .eq("id", id);
     if (error) throw error;
+    void logAudit("asset_request_decide", "asset_requests", id, null, { status: decision });
   },
 };

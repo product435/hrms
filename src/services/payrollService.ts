@@ -1,7 +1,8 @@
+import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { payrollRuns as fixtureRuns, payslips as fixturePayslips } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PayrollRun, Payslip } from "@/types";
-import { currentUserId, fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
 const periodOf = (year: unknown, month: unknown) =>
   year && month ? `${year}-${String(month).padStart(2, "0")}` : "";
 
@@ -42,6 +43,78 @@ const mapPayslip = (r: any): Payslip => {
     status: r.payment_status === "paid" ? "paid" : "pending",
   };
 };
+// Real PDF bytes, generated client-side with pdf-lib (no backend/rendering
+// service involved) -- replaces the previous plain-text payslip file with a
+// genuine single-page PDF built from this record's actual figures.
+async function buildPayslipPdf(input: {
+  employeeName: string;
+  period: string;
+  basic: number;
+  hra: number;
+  allowances: number;
+  bonus: number;
+  pf: number;
+  tax: number;
+  totalDeductions: number;
+  netSalary: number;
+}): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595.28, 421.89]); // A5 landscape-ish, plenty for one payslip
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const { width, height } = page.getSize();
+  const margin = 48;
+  let y = height - margin;
+
+  const line = (text: string, opts: { size?: number; useBold?: boolean; color?: [number, number, number]; gap?: number } = {}) => {
+    const size = opts.size ?? 11;
+    page.drawText(text, {
+      x: margin,
+      y,
+      size,
+      font: opts.useBold ? bold : font,
+      color: opts.color ? rgb(...opts.color) : rgb(0.1, 0.1, 0.1),
+    });
+    y -= opts.gap ?? size + 8;
+  };
+  const row = (label: string, value: string) => {
+    page.drawText(label, { x: margin, y, size: 11, font, color: rgb(0.35, 0.35, 0.35) });
+    page.drawText(value, { x: width - margin - font.widthOfTextAtSize(value, 11), y, size: 11, font, color: rgb(0.1, 0.1, 0.1) });
+    y -= 20;
+  };
+
+  line("TeamNest", { size: 18, useBold: true, gap: 26 });
+  line(`Payslip for ${input.period}`, { size: 13, useBold: true, gap: 20 });
+  line(`Employee: ${input.employeeName}`, { size: 11, gap: 24 });
+
+  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
+  y -= 20;
+
+  row("Basic", input.basic.toFixed(2));
+  row("HRA", input.hra.toFixed(2));
+  row("Allowances", input.allowances.toFixed(2));
+  row("Bonus", input.bonus.toFixed(2));
+  row("PF", `-${input.pf.toFixed(2)}`);
+  row("Tax", `-${input.tax.toFixed(2)}`);
+  row("Total deductions", `-${input.totalDeductions.toFixed(2)}`);
+
+  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
+  y -= 22;
+  page.drawText("Net pay", { x: margin, y, size: 13, font: bold, color: rgb(0.1, 0.1, 0.1) });
+  const netText = input.netSalary.toFixed(2);
+  page.drawText(netText, { x: width - margin - bold.widthOfTextAtSize(netText, 13), y, size: 13, font: bold, color: rgb(0.1, 0.4, 0.2) });
+
+  page.drawText(`Generated on ${new Date().toISOString().slice(0, 10)} · This is a system-generated payslip.`, {
+    x: margin,
+    y: margin / 2,
+    size: 8,
+    font,
+    color: rgb(0.55, 0.55, 0.55),
+  });
+
+  return doc.save();
+}
+
 export const payrollService = {
   // Creates (or re-opens) the run, then generates one payroll_records row per
   // active employee, snapshotting the salary_structures row that was in
@@ -127,6 +200,7 @@ export const payrollService = {
         .upsert(records, { onConflict: "employee_id,payroll_run_id" });
       if (recordsError) throw recordsError;
     }
+    void logAudit("payroll_run_start", "payroll_runs", run.id, null, { year: input.year, month: input.month, employees: records.length });
     return run;
   },
   // Locks a draft run's numbers and hands it off for approval. Deliberately
@@ -161,19 +235,18 @@ export const payrollService = {
       })
       .eq("id", runId);
     if (runError) throw runError;
+    void logAudit("payroll_run_process", "payroll_runs", runId, null, { status: "processed" });
   },
   // Final sign-off: marks every record in the run paid and generates one
   // payslip per record (skipping any that already have one, so re-approving
   // after a partial failure never duplicates). Only fires from "processed".
   //
-  // No real PDF-generation capability exists anywhere in this project, and
-  // building one would be exactly the "large PDF-generation system" this was
-  // told not to invent. Instead each payslip is a small, real, private text
-  // file -- genuine stored content built from this record's actual figures,
-  // not a fake URL -- uploaded to the same private `documents` bucket
-  // Documents already uses, under the same <employeeId>/... path convention.
-  // That reuses the bucket's existing self/admin-hr/manager RLS policies
-  // as-is: no new bucket, no new storage policy, no new table.
+  // Each payslip is a real, single-page PDF (built client-side with
+  // pdf-lib, no backend rendering service) from this record's actual
+  // figures -- uploaded to the same private `documents` bucket Documents
+  // already uses, under the same <employeeId>/... path convention. That
+  // reuses the bucket's existing self/admin-hr/manager RLS policies as-is:
+  // no new bucket, no new storage policy, no new table.
   async approveRun(runId: string) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const { data: run, error: fetchError } = await supabase
@@ -215,23 +288,22 @@ export const payrollService = {
     for (const r of missing) {
       const name = r.employees ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim() : "Employee";
       const totalDeductions = Number(r.total_deductions ?? 0);
-      const text = [
-        `Payslip - ${period}`,
-        `Employee: ${name}`,
-        "",
-        `Basic: ${r.basic ?? 0}`,
-        `HRA: ${r.hra ?? 0}`,
-        `Allowances: ${r.allowances ?? 0}`,
-        `Bonus: ${r.bonus ?? 0}`,
-        `PF: ${r.pf ?? 0}`,
-        `Tax: ${r.tax ?? 0}`,
-        `Total deductions: ${totalDeductions}`,
-        `Net pay: ${r.net_salary ?? 0}`,
-      ].join("\n");
-      const path = `${r.employee_id}/payslip-${period}.txt`;
+      const pdfBytes = await buildPayslipPdf({
+        employeeName: name,
+        period,
+        basic: Number(r.basic ?? 0),
+        hra: Number(r.hra ?? 0),
+        allowances: Number(r.allowances ?? 0),
+        bonus: Number(r.bonus ?? 0),
+        pf: Number(r.pf ?? 0),
+        tax: Number(r.tax ?? 0),
+        totalDeductions,
+        netSalary: Number(r.net_salary ?? 0),
+      });
+      const path = `${r.employee_id}/payslip-${period}.pdf`;
       const upload = await supabase.storage
         .from("documents")
-        .upload(path, new Blob([text], { type: "text/plain" }), { upsert: true });
+        .upload(path, new Blob([pdfBytes as BlobPart], { type: "application/pdf" }), { upsert: true });
       if (upload.error) throw upload.error;
       const { error: insertError } = await supabase
         .from("payslips")
@@ -244,6 +316,7 @@ export const payrollService = {
       .update({ status: "approved" })
       .eq("id", runId);
     if (approveError) throw approveError;
+    void logAudit("payroll_run_approve", "payroll_runs", runId, null, { period, records: records.length });
   },
   // Sends a processed-but-not-yet-approved run back to draft for correction
   // (e.g. a salary structure needs fixing before payout) -- there is no
@@ -266,6 +339,7 @@ export const payrollService = {
       .update({ status: "draft", processed_at: null, processed_by: null })
       .eq("id", runId);
     if (error) throw error;
+    void logAudit("payroll_run_reject", "payroll_runs", runId, null, { status: "draft" });
   },
   async runs(): Promise<PayrollRun[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureRuns);

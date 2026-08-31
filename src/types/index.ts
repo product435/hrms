@@ -30,6 +30,7 @@ export interface Employee {
   location: string;
   joinedOn: string;
   status: EmploymentStatus;
+  exitDate?: string;
   employmentType: EmploymentType;
   shift: string;
   gender: string;

@@ -1,7 +1,7 @@
 import { employees as fixtureEmployees, leaveRequests as fixtureLeave } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { LeaveRequest } from "@/types";
-import { currentUserId, fromFixture, matchesSearch, requireEmployeeId, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, logAudit, matchesSearch, requireEmployeeId, type QueryOptions } from "./api";
 
 function mapLeave(row: any): LeaveRequest {
   return {
@@ -73,6 +73,10 @@ export const leaveService = {
     if (error) throw error;
     return (data ?? []).map((t) => ({ id: t.id, name: t.name ?? "", annualLimit: Number(t.annual_limit ?? 0) }));
   },
+  // Balance is now ledger-backed: change_days is negative on request (debit)
+  // and positive on rejection (credit-back), written by the leave_ledger_trigger
+  // on leave_requests -- never client-written -- so this always reflects a
+  // real, persisted transaction history rather than a live recomputation.
   async balance(employeeId: string): Promise<{ id: string; name: string; allocated: number; used: number; remaining: number }[]> {
     if (!isSupabaseConfigured || !supabase) {
       const employee = fixtureEmployees.find((e) => e.id === employeeId);
@@ -83,28 +87,50 @@ export const leaveService = {
     }
     const resolved = await requireEmployeeId(employeeId);
     const year = new Date().getFullYear();
-    const [{ data: types, error: typesError }, { data: requests, error: requestsError }] = await Promise.all([
+    const [{ data: types, error: typesError }, { data: ledger, error: ledgerError }] = await Promise.all([
       supabase.from("leave_types").select("id,name,annual_limit").order("name"),
       supabase
-        .from("leave_requests")
-        .select("leave_type_id,total_days")
+        .from("leave_ledger")
+        .select("leave_type_id,change_days")
         .eq("employee_id", resolved)
-        .in("status", ["approved", "pending"])
-        .gte("start_date", `${year}-01-01`)
-        .lte("start_date", `${year}-12-31`),
+        .gte("created_at", `${year}-01-01`)
+        .lte("created_at", `${year}-12-31`),
     ]);
     if (typesError) throw typesError;
-    if (requestsError) throw requestsError;
+    if (ledgerError) throw ledgerError;
     const usedByType = new Map<string, number>();
-    (requests ?? []).forEach((r) => {
+    (ledger ?? []).forEach((r) => {
       if (!r.leave_type_id) return;
-      usedByType.set(r.leave_type_id, (usedByType.get(r.leave_type_id) ?? 0) + Number(r.total_days ?? 0));
+      // change_days is negative for a debit, positive for a credit-back --
+      // subtracting it accumulates the correct net "used" total.
+      usedByType.set(r.leave_type_id, (usedByType.get(r.leave_type_id) ?? 0) - Number(r.change_days ?? 0));
     });
     return (types ?? []).map((t) => {
       const allocated = Number(t.annual_limit ?? 0);
       const used = usedByType.get(t.id) ?? 0;
       return { id: t.id, name: t.name ?? "", allocated, used, remaining: Math.max(allocated - used, 0) };
     });
+  },
+  // Raw transaction history for the leave ledger/history view.
+  async ledger(employeeId: string): Promise<
+    { id: string; typeName: string; changeDays: number; transactionType: string; reason: string; createdAt: string }[]
+  > {
+    if (!isSupabaseConfigured || !supabase) return fromFixture([]);
+    const resolved = await requireEmployeeId(employeeId);
+    const { data, error } = await supabase
+      .from("leave_ledger")
+      .select("id,change_days,transaction_type,reason,created_at,leave_types(name)")
+      .eq("employee_id", resolved)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map((r) => ({
+      id: r.id,
+      typeName: r.leave_types?.name ?? "Leave",
+      changeDays: Number(r.change_days ?? 0),
+      transactionType: r.transaction_type ?? "",
+      reason: r.reason ?? "",
+      createdAt: r.created_at ?? "",
+    }));
   },
   async apply(payload: { type: string; from: string; to: string; reason: string }) {
     if (!isSupabaseConfigured || !supabase)
@@ -134,6 +160,7 @@ export const leaveService = {
       .select("*, employees(first_name,last_name), leave_types(name)")
       .single();
     if (error) throw error;
+    void logAudit("leave_request_create", "leave_requests", data.id, null, { total_days: totalDays, status: "pending" });
     return mapLeave(data);
   },
   async decide(id: string, decision: "approved" | "rejected") {
@@ -146,6 +173,7 @@ export const leaveService = {
       .select("*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)")
       .single();
     if (error) throw error;
+    void logAudit("leave_request_decide", "leave_requests", id, null, { status: decision });
     return mapLeave(data);
   },
 };

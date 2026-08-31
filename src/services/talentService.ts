@@ -7,7 +7,7 @@ import {
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Candidate, Goal, JobOpening, OnboardingJourney, PerformanceReview } from "@/types";
-import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import { fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
 const mapJob = (r: any): JobOpening => ({
   id: r.id,
   title: r.title,
@@ -334,6 +334,7 @@ export const talentService = {
     }));
     const { error } = await supabase.from("performance_reviews").insert(rows);
     if (error) throw error;
+    void logAudit("performance_cycle_create", "performance_reviews", null, null, { cycle: cycleName, employees: rows.length });
   },
   async submitSelfReview(reviewId: string, input: { selfRating: number; feedback?: string }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");

@@ -15,7 +15,7 @@ import type {
   HelpdeskTicket,
   NotificationItem,
 } from "@/types";
-import { currentUserId, fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
+import { currentUserId, fromFixture, logAudit, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
 const mapDocument = (r: any): DocumentItem => ({
   id: r.id,
   name: r.title,
@@ -127,6 +127,7 @@ export const workplaceService = {
         uploaded_by: uploadedBy,
       }).select("id").single();
       if (error) throw error;
+      void logAudit("document_upload", "documents", data.id, null, { title: file.name, category });
       return data;
     } catch (error) {
       // Do not leave an orphaned object when the metadata insert is rejected.
@@ -171,6 +172,7 @@ export const workplaceService = {
       .select("id")
       .single();
     if (error) throw error;
+    void logAudit("expense_claim_create", "expense_claims", data.id, null, { category: input.category, amount: input.amount });
     return data;
   },
   async decideExpenseClaim(id: string, decision: "approved" | "rejected", rejectionReason?: string) {
@@ -186,6 +188,7 @@ export const workplaceService = {
       })
       .eq("id", id);
     if (error) throw error;
+    void logAudit("expense_claim_decide", "expense_claims", id, null, { status: decision });
   },
   // Reimbursement is the one status the existing UI already promises (the
   // page copy says "review, approve and reimburse", and the status filter
@@ -213,6 +216,7 @@ export const workplaceService = {
       .select("id")
       .single();
     if (error) throw error;
+    void logAudit("helpdesk_ticket_create", "helpdesk_tickets", data.id, null, { subject: input.subject, category: input.category });
     return data;
   },
   async updateTicketStatus(id: string, status: string) {
@@ -222,6 +226,7 @@ export const workplaceService = {
       .update({ status, ...(status === "resolved" || status === "closed" ? { resolved_at: new Date().toISOString() } : {}) })
       .eq("id", id);
     if (error) throw error;
+    void logAudit("helpdesk_ticket_status_update", "helpdesk_tickets", id, null, { status });
   },
   async updateTicketAssignee(id: string, assignedTo: string | null) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
@@ -307,6 +312,21 @@ export const workplaceService = {
       ...(r.reference_id ? { referenceId: r.reference_id } : {}),
       ...(r.reference_type ? { referenceType: r.reference_type } : {}),
     }));
+  },
+  // notifications_self_all (user_id = auth.uid()) already permits an
+  // authenticated user to update their own rows -- no schema change needed
+  // for either of these, only the read path was missing a write UI before.
+  async markNotificationRead(id: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    const { error } = await supabase.from("notifications").update({ is_read: true }).eq("id", id);
+    if (error) throw error;
+  },
+  async markAllNotificationsRead(): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    const userId = await currentUserId();
+    if (!userId) return;
+    const { error } = await supabase.from("notifications").update({ is_read: true }).eq("user_id", userId).eq("is_read", false);
+    if (error) throw error;
   },
   async auditTrail(options: QueryOptions = {}): Promise<AuditEntry[]> {
     if (!isSupabaseConfigured || !supabase)

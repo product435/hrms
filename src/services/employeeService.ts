@@ -1,7 +1,7 @@
 import { departments as fixtureDepartments, employees as fixtureEmployees } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Department, Employee, Role } from "@/types";
-import { fromFixture, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import { fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
 import { displayName, normalizeKey } from "@/lib/normalize";
 
 function mapEmployee(row: any): Employee {
@@ -29,6 +29,7 @@ function mapEmployee(row: any): Employee {
     location: row.work_location ?? "",
     joinedOn: row.joining_date ?? "",
     status: row.employment_status,
+    exitDate: row.exit_date ?? "",
     employmentType: row.employment_type,
     shift: row.shifts?.name ?? "",
     gender: row.gender ?? "",
@@ -91,6 +92,7 @@ export const employeeService = {
       .select("id")
       .single();
     if (error) throw error;
+    void logAudit("employee_create", "employees", data.id, null, { employee_code: input.employeeCode, email: input.email });
     return data;
   },
   async update(
@@ -108,6 +110,11 @@ export const employeeService = {
       designationId?: string;
       employmentType?: string;
       status?: string;
+      // Real exit/termination date -- only meaningful (and only ever sent
+      // by the UI) when status is being set to "resigned". Superscedes the
+      // old updated_at-based approximation the Dashboard used to fall back
+      // to for the "Joiners vs exits" chart and attrition rate.
+      exitDate?: string;
     },
   ) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
@@ -126,9 +133,11 @@ export const employeeService = {
         ...(input.designationId !== undefined ? { designation_id: input.designationId || null } : {}),
         ...(input.employmentType !== undefined ? { employment_type: input.employmentType } : {}),
         ...(input.status !== undefined ? { employment_status: input.status } : {}),
+        ...(input.status !== undefined ? { exit_date: input.status === "resigned" ? input.exitDate || null : null } : {}),
       })
       .eq("id", id);
     if (error) throw error;
+    void logAudit("employee_update", "employees", id, null, input as Record<string, unknown>);
   },
   async list(options: QueryOptions = {}): Promise<Employee[]> {
     if (!isSupabaseConfigured || !supabase)

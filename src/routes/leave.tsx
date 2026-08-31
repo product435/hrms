@@ -5,6 +5,7 @@ import { CalendarPlus, Check, ClipboardList, X } from "lucide-react";
 import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
+import { SectionCard } from "@/components/common/SectionCard";
 import { StatCard } from "@/components/common/StatCard";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
@@ -87,6 +88,10 @@ function LeavePage() {
   const balance = useQuery({
     queryKey: ["leave-balance", user.employeeId ?? user.id],
     queryFn: () => leaveService.balance(user.employeeId ?? user.id),
+  });
+  const ledger = useQuery({
+    queryKey: ["leave-ledger", user.employeeId ?? user.id],
+    queryFn: () => leaveService.ledger(user.employeeId ?? user.id),
   });
 
   const apply = useMutation({
@@ -298,6 +303,25 @@ function LeavePage() {
         })}
         <StatCard label="Pending" value={String(pendingCount)} icon={ClipboardList} tone="warning" hint="in current view" />
       </div>
+
+      {(ledger.data ?? []).length > 0 ? (
+        <SectionCard title="Leave ledger" description="Your balance transaction history" bodyClassName="divide-y divide-border p-0">
+          <ul>
+            {ledger.data!.slice(0, 8).map((entry) => (
+              <li key={entry.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+                <div>
+                  <p className="font-medium">{entry.typeName}</p>
+                  <p className="text-xs text-muted-foreground">{entry.reason} · {shortDate(entry.createdAt)}</p>
+                </div>
+                <span className={entry.changeDays < 0 ? "font-semibold text-destructive" : "font-semibold text-emerald-600"}>
+                  {entry.changeDays > 0 ? "+" : ""}
+                  {entry.changeDays}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
+      ) : null}
 
       <DataTable
         columns={columns}

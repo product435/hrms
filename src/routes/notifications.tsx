@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
+import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { Button } from "@/components/ui/button";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { workplaceService } from "@/services/workplaceService";
 import type { NotificationItem } from "@/types";
@@ -19,6 +21,7 @@ export const Route = createFileRoute("/notifications")({
 });
 
 function NotificationsPage() {
+  const queryClient = useQueryClient();
   const notifications = useQuery({
     queryKey: ["notifications"],
     queryFn: () => workplaceService.notifications(),
@@ -26,13 +29,36 @@ function NotificationsPage() {
 
   const unread = (notifications.data ?? []).filter((item) => !item.read).length;
 
+  const markRead = useMutation({
+    mutationFn: (id: string) => workplaceService.markNotificationRead(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onError: (e) => toast.error("Could not mark as read", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
+  const markAllRead = useMutation({
+    mutationFn: () => workplaceService.markAllNotificationsRead(),
+    onSuccess: () => {
+      toast.success("All caught up");
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+    onError: (e) => toast.error("Could not mark all as read", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+  });
+
   return (
     <AppLayout>
       <PageHeader
         eyebrow="Overview"
         title="Notifications"
         description="Leave decisions, payroll events, asset updates and system alerts in one feed."
-        actions={<StatusBadge status={`${unread} unread`} tone={unread > 0 ? "info" : "neutral"} />}
+        actions={
+          <div className="flex items-center gap-2">
+            <StatusBadge status={`${unread} unread`} tone={unread > 0 ? "info" : "neutral"} />
+            {unread > 0 ? (
+              <Button variant="outline" size="sm" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
+                Mark all as read
+              </Button>
+            ) : null}
+          </div>
+        }
       />
 
       {notifications.isLoading ? (
@@ -53,7 +79,11 @@ function NotificationsPage() {
             {(notifications.data ?? []).map((item) => (
               <li
                 key={item.id}
-                className={`px-5 py-4 ${item.read ? "bg-background" : "bg-primary/5"}`}
+                role={item.read ? undefined : "button"}
+                onClick={() => {
+                  if (!item.read) markRead.mutate(item.id);
+                }}
+                className={`px-5 py-4 ${item.read ? "bg-background" : "cursor-pointer bg-primary/5"}`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">

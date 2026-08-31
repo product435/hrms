@@ -31,10 +31,10 @@ export interface CompanySummary {
   onLeaveToday: number;
   wfhToday: number;
   lateToday: number;
-  // The schema has no exit-date column on employees -- employment_status
-  // records THAT someone resigned, not WHEN, so a real (time-bounded)
-  // attrition rate can't be computed. null means "not determinable from the
-  // current schema", not zero attrition -- the UI must render this as N/A.
+  // Trailing-12-month attrition: exits with a real exit_date in the last 12
+  // months, divided by current active headcount. null only when headcount
+  // is zero (nothing to divide by) -- otherwise always a real number,
+  // including 0 when there have been no exits.
   attritionRate: number | null;
   openPositions: number;
   pendingApprovals: number;
@@ -68,6 +68,7 @@ export const insightsService = {
       });
     }
     const today = new Date().toISOString().slice(0, 10);
+    const twelveMonthsAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
     const [
       { count: headcount },
       { data: att },
@@ -77,6 +78,7 @@ export const insightsService = {
       { data: assets },
       { data: tickets },
       { data: activeJoiningDates },
+      { count: exitsLast12Months },
     ] = await Promise.all([
       supabase
         .from("employees")
@@ -95,6 +97,11 @@ export const insightsService = {
       supabase.from("assets").select("status"),
       supabase.from("helpdesk_tickets").select("status"),
       supabase.from("employees").select("joining_date").neq("employment_status", "resigned"),
+      supabase
+        .from("employees")
+        .select("id", { count: "exact", head: true })
+        .not("exit_date", "is", null)
+        .gte("exit_date", twelveMonthsAgo),
     ]);
     const tenureYears = (activeJoiningDates ?? [])
       .map((r) => r.joining_date)
@@ -118,7 +125,7 @@ export const insightsService = {
       ).length,
       wfhToday: (att ?? []).filter((r) => r.status === "wfh").length,
       lateToday: (att ?? []).filter((r) => r.status === "late").length,
-      attritionRate: null,
+      attritionRate: headcount ? Number((((exitsLast12Months ?? 0) / headcount) * 100).toFixed(1)) : null,
       openPositions: (jobs ?? []).length,
       pendingApprovals: (leaves ?? []).filter((r) => r.status === "pending").length,
       payrollNet,
@@ -162,7 +169,7 @@ export const insightsService = {
     const organizationId = await requireOrganizationId();
     const { data, error } = await supabase
       .from("employees")
-      .select("joining_date,employment_status,updated_at")
+      .select("joining_date,employment_status,exit_date")
       .eq("organization_id", organizationId);
     if (error) throw error;
     const byMonth = new Map<string, { joined: number; exited: number }>();
@@ -176,13 +183,12 @@ export const insightsService = {
       // whether they've since resigned -- they still genuinely joined that
       // month.
       if (r.joining_date) bump(r.joining_date.slice(0, 7), "joined");
-      // employees has no dedicated exit/termination-date column -- updated_at
-      // is the closest real, existing signal for when a resignation was
-      // recorded (the set_updated_at trigger bumps it whenever
-      // employment_status is changed to "resigned"). Previously this bucketed
-      // exits into the employee's *joining* month instead, which is wrong
-      // for anyone who resigned in a different month than they joined.
-      if (r.employment_status === "resigned" && r.updated_at) bump(r.updated_at.slice(0, 7), "exited");
+      // employees.exit_date is the real termination date (set explicitly
+      // when status transitions to resigned -- see employeeService.update).
+      // A resigned employee with no exit_date set yet (legacy row, or the
+      // date was left blank) is intentionally not counted here rather than
+      // guessed at from an unrelated timestamp.
+      if (r.employment_status === "resigned" && r.exit_date) bump(r.exit_date.slice(0, 7), "exited");
     });
     const currentLabel = monthLabel(new Date());
     const trailingWindowStart = addMonths(currentLabel, -5);

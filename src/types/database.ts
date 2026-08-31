@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.15"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -882,6 +882,7 @@ export type Database = {
           employee_code: string | null
           employment_status: string | null
           employment_type: string | null
+          exit_date: string | null
           first_name: string | null
           gender: string | null
           id: string
@@ -906,6 +907,7 @@ export type Database = {
           employee_code?: string | null
           employment_status?: string | null
           employment_type?: string | null
+          exit_date?: string | null
           first_name?: string | null
           gender?: string | null
           id?: string
@@ -930,6 +932,7 @@ export type Database = {
           employee_code?: string | null
           employment_status?: string | null
           employment_type?: string | null
+          exit_date?: string | null
           first_name?: string | null
           gender?: string | null
           id?: string
@@ -1316,6 +1319,74 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      leave_ledger: {
+        Row: {
+          balance_after: number | null
+          change_days: number
+          created_at: string
+          created_by: string | null
+          employee_id: string
+          id: string
+          leave_request_id: string | null
+          leave_type_id: string | null
+          reason: string | null
+          transaction_type: string
+        }
+        Insert: {
+          balance_after?: number | null
+          change_days: number
+          created_at?: string
+          created_by?: string | null
+          employee_id: string
+          id?: string
+          leave_request_id?: string | null
+          leave_type_id?: string | null
+          reason?: string | null
+          transaction_type: string
+        }
+        Update: {
+          balance_after?: number | null
+          change_days?: number
+          created_at?: string
+          created_by?: string | null
+          employee_id?: string
+          id?: string
+          leave_request_id?: string | null
+          leave_type_id?: string | null
+          reason?: string | null
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_ledger_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_ledger_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_ledger_leave_request_id_fkey"
+            columns: ["leave_request_id"]
+            isOneToOne: false
+            referencedRelation: "leave_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_ledger_leave_type_id_fkey"
+            columns: ["leave_type_id"]
+            isOneToOne: false
+            referencedRelation: "leave_types"
             referencedColumns: ["id"]
           },
         ]
@@ -2224,6 +2295,16 @@ export type Database = {
       is_manager: { Args: never; Returns: boolean }
       is_my_direct_report: { Args: { emp_id: string }; Returns: boolean }
       is_org_member: { Args: { target_org: string }; Returns: boolean }
+      log_audit_event: {
+        Args: {
+          p_action: string
+          p_entity_id?: string
+          p_entity_type: string
+          p_new_data?: Json
+          p_old_data?: Json
+        }
+        Returns: undefined
+      }
       request_password_reset: {
         Args: { p_email: string }
         Returns: {
