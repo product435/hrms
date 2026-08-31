@@ -20,10 +20,21 @@ const errorMiddleware = createMiddleware().server(async ({ next }) => {
 // Start installs this automatically when src/start.ts is absent; defining the
 // file opts out, so re-add it explicitly to keep server functions protected
 // from cross-site requests.
-const csrfMiddleware = createCsrfMiddleware({
-  filter: (ctx) => ctx.handlerType === "serverFn",
-});
-
+//
+// Built lazily inside the createStart() factory rather than at module top
+// level: the production SSR bundle splits createCsrfMiddleware's real
+// implementation into a separate chunk that circularly imports back from
+// this one, so calling it eagerly during this module's own top-level
+// evaluation can race that chunk's initialization and see an unresolved
+// binding (TypeError: createCsrfMiddleware is not a function). The
+// createStart factory itself already runs lazily (after all modules have
+// finished loading), so building the middleware inside it sidesteps the
+// circular-import timing window entirely.
 export const startInstance = createStart(() => ({
-  requestMiddleware: [errorMiddleware, csrfMiddleware],
+  requestMiddleware: [
+    errorMiddleware,
+    createCsrfMiddleware({
+      filter: (ctx) => ctx.handlerType === "serverFn",
+    }),
+  ],
 }));
