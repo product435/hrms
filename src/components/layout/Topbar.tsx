@@ -1,7 +1,18 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Bell, LogOut, Menu, Moon, Search, Settings, Sun, UserCircle2 } from "lucide-react";
+import {
+  Bell,
+  Loader2,
+  LogOut,
+  Menu,
+  Moon,
+  Search,
+  Settings,
+  Sun,
+  UserCircle2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,10 +39,26 @@ type SearchResult = {
 };
 
 export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
-  const { user, role, signOut } = useSession();
+  const { user, role, signOut, can } = useSession();
   const navigate = useNavigate();
+  const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const [search, setSearch] = useState("");
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    const result = await signOut();
+    if (result.error) {
+      toast.error("Sign out failed", { description: result.error.message });
+      setIsSigningOut(false);
+      return;
+    }
+
+    await navigate({ to: "/sign-in", replace: true });
+    await router.invalidate();
+  }
   const notifications = useQuery({
     queryKey: ["notifications", "topbar"],
     queryFn: () => workplaceService.notifications(),
@@ -215,20 +242,28 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
                 <UserCircle2 className="size-4" /> My profile
               </Link>
             </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/settings">
-                <Settings className="size-4" /> Settings
-              </Link>
-            </DropdownMenuItem>
+            {can(["admin", "hr", "manager"]) ? (
+              <DropdownMenuItem asChild>
+                <Link to="/settings">
+                  <Settings className="size-4" /> Settings
+                </Link>
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="cursor-pointer"
-              onSelect={() => {
-                void signOut();
-                void navigate({ to: "/sign-in" });
+              disabled={isSigningOut}
+              onSelect={(event) => {
+                event.preventDefault();
+                void handleSignOut();
               }}
             >
-              <LogOut className="size-4" /> Sign out
+              {isSigningOut ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <LogOut className="size-4" />
+              )}
+              {isSigningOut ? "Signing out…" : "Sign out"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

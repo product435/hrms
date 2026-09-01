@@ -7,13 +7,21 @@ import { logAudit } from "./api";
 // Supabase auth errors carry a machine-readable `code` in current supabase-js
 // versions, but that's not guaranteed across every version/error path, so
 // this also falls back to matching the message text.
-function mapAuthError(error: { message: string; code?: string | undefined; status?: number | undefined }): string {
+function mapAuthError(error: {
+  message: string;
+  code?: string | undefined;
+  status?: number | undefined;
+}): string {
   const code = error.code ?? "";
   const msg = error.message ?? "";
   if (code === "email_address_invalid" || /email.*invalid|invalid.*email/i.test(msg)) {
     return "This email address isn't accepted. Double-check it and try again.";
   }
-  if (code === "over_email_send_rate_limit" || code === "over_request_rate_limit" || /rate limit/i.test(msg)) {
+  if (
+    code === "over_email_send_rate_limit" ||
+    code === "over_request_rate_limit" ||
+    /rate limit/i.test(msg)
+  ) {
     return "Too many attempts. Please wait a minute and try again.";
   }
   if (code === "email_not_confirmed") {
@@ -65,6 +73,8 @@ type EmployeeRow = {
 const listeners = new Set<SessionListener>();
 let currentSession: AuthSession | null = null;
 let supabaseSubscription: { unsubscribe: () => void } | null = null;
+let signOutInProgress = false;
+let signOutPromise: Promise<{ error?: AuthError }> | null = null;
 
 function writeSession(session: AuthSession | null) {
   currentSession = session;
@@ -168,6 +178,7 @@ export async function sessionForUser(
 function ensureSupabaseListener() {
   if (!supabase || supabaseSubscription) return;
   supabaseSubscription = supabase.auth.onAuthStateChange((_event, session) => {
+    if (signOutInProgress) return;
     void sessionForUser(supabase, session?.user ?? null)
       .then(writeSession)
       .catch(() => writeSession(null));
@@ -344,17 +355,41 @@ export const authService = {
     const { error } = await supabase.auth.updateUser({ password });
     return error ? { error: { message: error.message } } : { success: true };
   },
-  async signOut() {
-    // Logged before the JWT is invalidated below -- current_org_id() inside
-    // the RPC needs the still-live session to resolve who/which org this is.
-    await logAudit("auth_sign_out", "profiles");
-    writeSession(null);
-    if (supabase) {
+  async signOut(): Promise<{ error?: AuthError }> {
+    if (signOutPromise) return signOutPromise;
+
+    signOutPromise = (async () => {
+      signOutInProgress = true;
       try {
-        await supabase.auth.signOut();
-      } catch {
-        // The local session is already cleared so the UI can redirect immediately.
+        // Logged while the JWT is still valid so current_org_id() can resolve
+        // the actor. The RPC is best-effort internally and never blocks a
+        // successful logout with an audit-only failure.
+        await logAudit("auth_sign_out", "profiles");
+
+        if (supabase) {
+          const { error } = await supabase.auth.signOut();
+          if (error) return { error: { message: mapAuthError(error) } };
+        }
+
+        // createBrowserClient stores the Supabase session in cookies. A
+        // successful signOut removes those cookies; this explicit write also
+        // updates every in-memory SessionProvider listener synchronously.
+        writeSession(null);
+        return {};
+      } catch (error) {
+        return {
+          error: {
+            message: mapAuthError({
+              message: error instanceof Error ? error.message : "Sign out failed.",
+            }),
+          },
+        };
+      } finally {
+        signOutInProgress = false;
+        signOutPromise = null;
       }
-    }
+    })();
+
+    return signOutPromise;
   },
 };

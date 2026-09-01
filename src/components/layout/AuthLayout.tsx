@@ -36,7 +36,7 @@ export function AuthLayout({
 
       <div className="relative mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-4 py-8 animate-in fade-in duration-500 ease-out sm:py-10">
         <div className="animate-in fade-in slide-in-from-bottom-2 mb-7 flex justify-center transition-transform duration-500 hover:scale-[1.02] sm:mb-8">
-          <Brand label="JeeVijay HRMS" />
+          <Brand label="JeeVijay HRMS" prominent />
         </div>
 
         <div className="animate-in fade-in slide-in-from-bottom-3 rounded-3xl border border-border/80 bg-card/95 p-5 shadow-float backdrop-blur-sm transition-shadow duration-300 hover:shadow-float sm:p-8">
@@ -50,7 +50,9 @@ export function AuthLayout({
         {footer ? (
           <div className="mt-6 text-center text-sm text-muted-foreground">{footer}</div>
         ) : null}
-        <p className="mt-3 text-center text-xs text-muted-foreground">© JeeVijay HRMS by Jeevijay Technologies</p>
+        <p className="mt-3 text-center text-xs text-muted-foreground">
+          © JeeVijay HRMS by Jeevijay Technologies
+        </p>
       </div>
     </div>
   );

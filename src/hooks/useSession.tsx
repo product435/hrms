@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { authService, type AuthSession } from "@/services/authService";
 import type { Role, SessionUser } from "@/types";
@@ -15,7 +8,7 @@ interface SessionContextValue {
   role: Role;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signOut: () => void;
+  signOut: () => Promise<{ error?: { message: string } }>;
   can: (roles: Role[]) => boolean;
   refresh: () => void;
 }
@@ -32,7 +25,7 @@ const SessionContext = createContext<SessionContextValue>({
   role: "employee",
   isAuthenticated: false,
   isLoading: true,
-  signOut: () => {},
+  signOut: async () => ({}),
   can: () => false,
   refresh: () => {},
 });
@@ -77,9 +70,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       role: session?.user?.role ?? "employee",
       isAuthenticated: Boolean(session),
       isLoading,
-      signOut: () => {
+      signOut: async () => {
+        const result = await authService.signOut();
+        if (result.error) return result;
+        await queryClient.cancelQueries();
         queryClient.clear();
-        void authService.signOut();
+        setSession(null);
+        return {};
       },
       can: (roles) => (session ? roles.includes(session.user.role) : false),
       refresh: () => setSession(authService.getSession()),
