@@ -93,7 +93,7 @@ export async function requireEmployeeId(fallbackId?: string): Promise<string> {
 export function ensureSupabase() {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.",
+      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.",
     );
   }
   return supabase;
