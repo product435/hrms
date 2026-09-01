@@ -12,6 +12,7 @@ import {
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { fromFixture, requireOrganizationId } from "./api";
 import { displayName, normalizeKey } from "@/lib/normalize";
+import { indiaDateKey, indiaDateKeyDaysAgo } from "@/lib/format";
 
 // "YYYY-MM" for the given date, used as the month bucket key throughout this
 // file.
@@ -67,8 +68,8 @@ export const insightsService = {
         avgTenureYears: 2.9,
       });
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const twelveMonthsAgo = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const today = indiaDateKey();
+    const twelveMonthsAgo = indiaDateKeyDaysAgo(365);
     const [
       { count: headcount },
       { data: att },
@@ -142,7 +143,7 @@ export const insightsService = {
     const { data, error } = await supabase
       .from("attendance_records")
       .select("attendance_date,status")
-      .gte("attendance_date", new Date(Date.now() - 13 * 86400000).toISOString().slice(0, 10))
+      .gte("attendance_date", indiaDateKeyDaysAgo(13))
       .order("attendance_date");
     if (error) throw error;
     const grouped = new Map<string, any>();

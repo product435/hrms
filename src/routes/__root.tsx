@@ -80,28 +80,33 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "TeamNest" },
+      { title: "JeeVijay HRMS" },
       {
         name: "description",
         content:
-          "TeamNest is an enterprise HRMS for people operations: attendance, leave, payroll, assets, hiring and performance.",
+          "JeeVijay HRMS is an enterprise HRMS for people operations: attendance, leave, payroll, assets, hiring and performance.",
       },
       { name: "author", content: "Jeevijay Technologies" },
-      { property: "og:title", content: "TeamNest" },
+      { name: "application-name", content: "JeeVijay HRMS" },
+      { name: "theme-color", content: "#14b8c4" },
+      { property: "og:title", content: "JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Enterprise HR management for attendance, leave, payroll, assets and performance.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.ico?v=20260901", type: "image/x-icon", sizes: "any" },
+      { rel: "icon", href: "/favicon-32x32.png?v=20260901", type: "image/png", sizes: "32x32" },
+      { rel: "icon", href: "/favicon-16x16.png?v=20260901", type: "image/png", sizes: "16x16" },
+      { rel: "apple-touch-icon", href: "/apple-touch-icon.png?v=20260901", sizes: "180x180" },
+      { rel: "manifest", href: "/site.webmanifest?v=20260901" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {

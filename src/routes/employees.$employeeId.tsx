@@ -37,7 +37,15 @@ import { leaveService } from "@/services/leaveService";
 import { talentService } from "@/services/talentService";
 import { workplaceService } from "@/services/workplaceService";
 import { complaintsService } from "@/services/complaintsService";
-import { dayMonth, initialsOf, inr, percent, shortDate } from "@/lib/format";
+import {
+  dayMonth,
+  indiaLocalDateTimeToUtcIso,
+  indianTime,
+  initialsOf,
+  inr,
+  percent,
+  shortDate,
+} from "@/lib/format";
 import type { ComplaintPriority, ComplaintStatus } from "@/types";
 
 const COMPLAINT_STATUSES: ComplaintStatus[] = ["open", "in-progress", "resolved", "closed"];
@@ -56,13 +64,13 @@ export const Route = createFileRoute("/employees/$employeeId")({
     typeof search["tab"] === "string" ? { tab: search["tab"] } : {},
   head: () => ({
     meta: [
-      { title: "Employee profile · TeamNest" },
+      { title: "Employee profile · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Full employee profile: personal details, employment record, attendance, leave, assets, documents and performance.",
       },
-      { property: "og:title", content: "Employee profile · TeamNest" },
+      { property: "og:title", content: "Employee profile · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Personal, employment, attendance, asset and performance records for a single employee.",
@@ -153,15 +161,16 @@ function EmployeeDetailPage() {
   const requestCorrection = useMutation({
     mutationFn: () => {
       const targetDate = attendance.data?.find((r) => r.id === correctionForm.attendanceId)?.date;
+      if (!targetDate) throw new Error("Select a valid attendance record to correct.");
       return attendanceService.requestCorrection({
         employeeId,
         attendanceId: correctionForm.attendanceId,
         reason: correctionForm.reason,
         ...(correctionForm.requestedCheckIn
-          ? { requestedCheckIn: `${targetDate}T${correctionForm.requestedCheckIn}:00` }
+          ? { requestedCheckIn: indiaLocalDateTimeToUtcIso(targetDate, correctionForm.requestedCheckIn) }
           : {}),
         ...(correctionForm.requestedCheckOut
-          ? { requestedCheckOut: `${targetDate}T${correctionForm.requestedCheckOut}:00` }
+          ? { requestedCheckOut: indiaLocalDateTimeToUtcIso(targetDate, correctionForm.requestedCheckOut) }
           : {}),
       });
     },
@@ -424,7 +433,7 @@ function EmployeeDetailPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-semibold">{shortDate(record.date)}</p>
                       <p className="truncate text-xs text-muted-foreground">
-                        In {record.checkIn ?? "—"} · Out {record.checkOut ?? "—"} ·{" "}
+                        In {indianTime(record.checkIn)} · Out {indianTime(record.checkOut)} ·{" "}
                         {record.workedHours}h · {record.source}
                       </p>
                     </div>
@@ -767,7 +776,7 @@ function EmployeeDetailPage() {
               >
                 {(attendance.data ?? []).map((record) => (
                   <option key={record.id} value={record.id}>
-                    {shortDate(record.date)} · in {record.checkIn ?? "—"} · out {record.checkOut ?? "—"}
+                    {shortDate(record.date)} · in {indianTime(record.checkIn)} · out {indianTime(record.checkOut)}
                   </option>
                 ))}
               </select>

@@ -26,7 +26,7 @@ const EXPENSE_CATEGORIES: ExpenseClaim["category"][] = ["Travel", "Food", "Inter
 export const Route = createFileRoute("/expenses")({
   beforeLoad: () => requireAuthForPath("/expenses"),
   head: () => ({
-    meta: [{ title: "Expense claims · TeamNest" }],
+    meta: [{ title: "Expense claims · JeeVijay HRMS" }],
   }),
   component: ExpensesPage,
 });

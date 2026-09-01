@@ -24,7 +24,7 @@ const DOCUMENT_CATEGORIES = ["Identity", "Education", "Contract", "Policy", "Pay
 export const Route = createFileRoute("/documents")({
   beforeLoad: () => requireAuthForPath("/documents"),
   head: () => ({
-    meta: [{ title: "Documents · TeamNest" }],
+    meta: [{ title: "Documents · JeeVijay HRMS" }],
   }),
   component: DocumentsPage,
 });

@@ -1,6 +1,6 @@
-# TeamNest HR Suite
+# JeeVijay HRMS
 
-Build a modern, professional and production-style HRMS web application called TeamNest using React + Vite + TypeScript.
+JeeVijay HRMS is a professional HR management application built with React, TanStack Start, TypeScript, and Supabase.
 
 This is a frontend-first application. The backend will be implemented separately using Supabase. Do not create a fake backend or hardcoded business logic.
 
@@ -251,17 +251,7 @@ The final result should look like a real company HRMS product suitable for a pro
 Do not generate unnecessary fake backend APIs.
 Keep the frontend clean and ready for Supabase integration.
 
-This project was built with [Lovable](https://lovable.dev).
-
-**Live app**: https://flowhuman-core.lovable.app
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/b75e5ddc-70e5-47e1-9511-0f9ca2c044cc).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+**Live app**: https://teamnest-phi.vercel.app
 
 ## Development
 

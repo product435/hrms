@@ -19,7 +19,7 @@ export const Route = createFileRoute("/sign-in")({
   }),
   beforeLoad: () => redirectIfAuthenticated(),
   head: () => ({
-    meta: [{ title: "Sign in · TeamNest" }],
+    meta: [{ title: "Sign in · JeeVijay HRMS" }],
   }),
   component: SignInPage,
 });
@@ -56,7 +56,7 @@ function SignInPage() {
   return (
     <AuthLayout
       title="Sign in"
-      subtitle="Access your TeamNest workspace with your organisation account."
+      subtitle="Access your JeeVijay HRMS workspace with your organisation account."
       footer={
         <>
           Don&apos;t have an account?{" "}

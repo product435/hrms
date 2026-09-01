@@ -16,7 +16,7 @@ import { insightsService } from "@/services/insightsService";
 export const Route = createFileRoute("/reports")({
   beforeLoad: () => requireAuthForPath("/reports"),
   head: () => ({
-    meta: [{ title: "Reports & analytics · TeamNest" }],
+    meta: [{ title: "Reports & analytics · JeeVijay HRMS" }],
   }),
   component: ReportsPage,
 });

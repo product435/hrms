@@ -42,13 +42,13 @@ export const Route = createFileRoute("/leave")({
     typeof search["status"] === "string" ? { status: search["status"] } : {},
   head: () => ({
     meta: [
-      { title: "Leave management · TeamNest" },
+      { title: "Leave management · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Apply for leave, track balances and approve or reject requests with a full audit of every decision.",
       },
-      { property: "og:title", content: "Leave management · TeamNest" },
+      { property: "og:title", content: "Leave management · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Leave balances, applications and multi-level approvals in one workflow.",

@@ -20,13 +20,13 @@ export const Route = createFileRoute("/departments")({
   beforeLoad: () => requireAuthForPath("/departments"),
   head: () => ({
     meta: [
-      { title: "Departments & structure · TeamNest" },
+      { title: "Departments & structure · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Department headcount, cost centers, open roles and designation ladders across the organisation.",
       },
-      { property: "og:title", content: "Departments · TeamNest" },
+      { property: "og:title", content: "Departments · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Org structure with headcount, department heads, cost centers and open roles.",

@@ -8,7 +8,7 @@ import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 export const Route = createFileRoute("/unauthorized")({
   beforeLoad: () => requireAuth(),
   head: () => ({
-    meta: [{ title: "Access denied · TeamNest" }],
+    meta: [{ title: "Access denied · JeeVijay HRMS" }],
   }),
   component: UnauthorizedPage,
 });

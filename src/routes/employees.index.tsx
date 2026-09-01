@@ -22,13 +22,13 @@ export const Route = createFileRoute("/employees/")({
   beforeLoad: () => requireAuthForPath("/employees"),
   head: () => ({
     meta: [
-      { title: "Employee directory · TeamNest" },
+      { title: "Employee directory · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Search the employee directory by department and status, and open any profile for full employment details.",
       },
-      { property: "og:title", content: "Employee directory · TeamNest" },
+      { property: "og:title", content: "Employee directory · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Every employee record, department and reporting line in one searchable directory.",
@@ -66,7 +66,7 @@ function EmployeesPage() {
     const rows = employees.data ?? [];
     const csv = [["Employee code", "First name", "Last name", "Email", "Department", "Designation", "Status"], ...rows.map((e) => [e.code, e.firstName, e.lastName, e.email, e.department, e.designation, e.status])]
       .map((row) => row.map((v) => `"${String(v ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); const a = document.createElement("a"); a.href = url; a.download = "teamnest-employees.csv"; a.click(); URL.revokeObjectURL(url);
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); const a = document.createElement("a"); a.href = url; a.download = "jeevijay-hrms-employees.csv"; a.click(); URL.revokeObjectURL(url);
   };
 
   const columns = useMemo<Column<Employee>[]>(

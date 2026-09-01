@@ -15,7 +15,7 @@ import type { NotificationItem } from "@/types";
 export const Route = createFileRoute("/notifications")({
   beforeLoad: () => requireAuthForPath("/notifications"),
   head: () => ({
-    meta: [{ title: "Notifications · TeamNest" }],
+    meta: [{ title: "Notifications · JeeVijay HRMS" }],
   }),
   component: NotificationsPage,
 });

@@ -5,6 +5,7 @@ import {
   shifts as fixtureShifts,
 } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { indiaDateKey, indiaDateKeyDaysAgo } from "@/lib/format";
 import type { AttendanceCorrection, AttendanceRecord, Shift, TrendPoint } from "@/types";
 import { fromFixture, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
 
@@ -65,11 +66,12 @@ export const attendanceService = {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(fixtureAttendance.find((r) => r.employeeId === employeeId) ?? null);
     const resolved = await requireEmployeeId(employeeId);
+    const today = indiaDateKey();
     const { data, error } = await supabase
       .from("attendance_records")
       .select("*, employees(first_name,last_name), shifts(name)")
       .eq("employee_id", resolved)
-      .eq("attendance_date", new Date().toISOString().slice(0, 10))
+      .eq("attendance_date", today)
       .maybeSingle();
     if (error) throw error;
     return data ? mapAttendance(data) : null;
@@ -88,17 +90,17 @@ export const attendanceService = {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ employeeId, source, at: new Date().toISOString() });
     const resolved = await requireEmployeeId(employeeId);
+    const date = indiaDateKey();
     const existing = await supabase
       .from("attendance_records")
       .select("id,check_in,check_out")
       .eq("employee_id", resolved)
-      .eq("attendance_date", new Date().toISOString().slice(0, 10))
+      .eq("attendance_date", date)
       .maybeSingle();
     if (existing.error) throw existing.error;
     if (field === "check_in" && existing.data?.check_in) throw new Error("You are already checked in today.");
     if (field === "check_out" && !existing.data?.check_in) throw new Error("Check in before checking out.");
     if (field === "check_out" && existing.data?.check_out) throw new Error("You are already checked out today.");
-    const date = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
     const request = existing.data
       ? field === "check_in"
@@ -203,7 +205,7 @@ export const attendanceService = {
     let query = supabase
       .from("attendance_records")
       .select("attendance_date,status")
-      .gte("attendance_date", new Date(Date.now() - 6 * 86400000).toISOString().slice(0, 10));
+      .gte("attendance_date", indiaDateKeyDaysAgo(6));
     if (employeeId) query = query.eq("employee_id", employeeId);
     const { data, error } = await query;
     if (error) throw error;

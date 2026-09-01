@@ -28,7 +28,7 @@ const fmtScore = (v: number | null | undefined) => (v != null ? v.toFixed(1) : "
 export const Route = createFileRoute("/performance")({
   beforeLoad: () => requireAuthForPath("/performance"),
   head: () => ({
-    meta: [{ title: "Performance reviews · TeamNest" }],
+    meta: [{ title: "Performance reviews · JeeVijay HRMS" }],
   }),
   component: PerformancePage,
 });

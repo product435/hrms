@@ -14,7 +14,7 @@ import { isValidEmail, sanitizeEmail } from "@/lib/email";
 export const Route = createFileRoute("/forgot-password")({
   beforeLoad: () => redirectIfAuthenticated(),
   head: () => ({
-    meta: [{ title: "Forgot password · TeamNest" }],
+    meta: [{ title: "Forgot password · JeeVijay HRMS" }],
   }),
   component: ForgotPasswordPage,
 });

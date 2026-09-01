@@ -89,14 +89,14 @@ export const navSections: NavSection[] = [
   {
     title: "Growth",
     items: [
-      { label: "Goals", to: "/goals", icon: Target, roles: ["manager", "employee"] },
+      { label: "Goals", to: "/goals", icon: Target, roles: ALL },
       { label: "Performance", to: "/performance", icon: ChartBar, roles: ["admin", "hr", "manager", "employee"] },
     ],
   },
   {
     title: "Workplace",
     items: [
-      { label: "Assets", to: "/assets", icon: LaptopMinimal, roles: ["admin", "employee"] },
+      { label: "Assets", to: "/assets", icon: LaptopMinimal, roles: ALL },
       { label: "Documents", to: "/documents", icon: FileText, roles: ["admin", "hr", "manager", "employee"] },
       { label: "HR Helpdesk", to: "/helpdesk", icon: LifeBuoy, roles: ALL },
     ],
@@ -106,7 +106,7 @@ export const navSections: NavSection[] = [
     items: [
       { label: "Reports & Analytics", to: "/reports", icon: ChartBar, roles: ["admin", "hr"] },
       { label: "Activity History", to: "/audit", icon: Activity, roles: ["admin", "hr"] },
-      { label: "Settings", to: "/settings", icon: Settings, roles: ["admin", "manager"] },
+      { label: "Settings", to: "/settings", icon: Settings, roles: ["admin", "hr", "manager"] },
     ],
   },
 ];

@@ -148,7 +148,7 @@ export async function sessionForUser(
       : undefined) ||
     profile.full_name ||
     user.email?.split("@")[0] ||
-    "TeamNest user";
+    "JeeVijay HRMS user";
   const avatarUrl = profile.avatar_url ?? employee?.avatar_url;
   const employeeId = profile.employee_id ?? employee?.id ?? undefined;
   return {

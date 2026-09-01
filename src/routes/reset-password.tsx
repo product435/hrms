@@ -13,7 +13,7 @@ import { isStrongPassword, passwordChecks } from "@/lib/password";
 
 export const Route = createFileRoute("/reset-password")({
   head: () => ({
-    meta: [{ title: "Reset password · TeamNest" }],
+    meta: [{ title: "Reset password · JeeVijay HRMS" }],
   }),
   component: ResetPasswordPage,
 });
@@ -142,7 +142,7 @@ function ResetPasswordPage() {
   return (
     <AuthLayout
       title="Reset password"
-      subtitle="Choose a new password for your TeamNest account."
+      subtitle="Choose a new password for your JeeVijay HRMS account."
       footer={
         <Link to="/sign-in" className="font-medium text-primary hover:underline">
           Back to sign in

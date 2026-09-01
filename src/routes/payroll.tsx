@@ -21,13 +21,13 @@ export const Route = createFileRoute("/payroll")({
   beforeLoad: () => requireAuthForPath("/payroll"),
   head: () => ({
     meta: [
-      { title: "Payroll & payslips · TeamNest" },
+      { title: "Payroll & payslips · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Monthly payroll runs with gross, deductions and net payouts, plus downloadable payslip breakdowns.",
       },
-      { property: "og:title", content: "Payroll · TeamNest" },
+      { property: "og:title", content: "Payroll · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Run payroll, review deductions and share payslips with employees.",

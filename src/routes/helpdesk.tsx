@@ -30,7 +30,7 @@ const TICKET_PRIORITIES: HelpdeskTicket["priority"][] = ["low", "medium", "high"
 export const Route = createFileRoute("/helpdesk")({
   beforeLoad: () => requireAuthForPath("/helpdesk"),
   head: () => ({
-    meta: [{ title: "HR Helpdesk · TeamNest" }],
+    meta: [{ title: "HR Helpdesk · JeeVijay HRMS" }],
   }),
   component: HelpdeskPage,
 });

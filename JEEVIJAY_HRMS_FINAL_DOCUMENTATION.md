@@ -1,4 +1,4 @@
-# TeamNest HRMS — Final Documentation
+# JeeVijay HRMS — Final Documentation
 
 Audit date: 2026-08-31. This document describes the project **as it actually exists and behaves today**, verified by reading the live source code, querying the live Supabase project with real authenticated sessions, and driving the running app end-to-end with Playwright across all four roles. It is not an idealized design spec — known gaps and drift are called out explicitly rather than hidden.
 
@@ -6,7 +6,7 @@ Audit date: 2026-08-31. This document describes the project **as it actually exi
 
 ## 1. Project Overview
 
-**TeamNest** is a multi-tenant HR Management System (HRMS) for small/mid-size organizations (seed data is India-context: INR salaries, Indian cities, IFSC bank codes). It covers the standard HR lifecycle end to end: recruitment → onboarding → attendance/shifts → leave → payroll → performance/goals → offboarding-adjacent (asset return, complaints), plus supporting workplace features (documents, expenses, helpdesk, announcements, notifications) and an admin/HR analytics dashboard.
+**JeeVijay HRMS** is a multi-tenant HR Management System (HRMS) for small/mid-size organizations (seed data is India-context: INR salaries, Indian cities, IFSC bank codes). It covers the standard HR lifecycle end to end: recruitment → onboarding → attendance/shifts → leave → payroll → performance/goals → offboarding-adjacent (asset return, complaints), plus supporting workplace features (documents, expenses, helpdesk, announcements, notifications) and an admin/HR analytics dashboard.
 
 The project was scaffolded via Lovable (`@lovable.dev/vite-tanstack-config` in `vite.config.ts`) and is a genuinely working, Supabase-connected application — not a static prototype. With no Supabase environment variables set it degrades gracefully to a fully-navigable read-only demo off local fixtures (`src/lib/mock-data.ts`); with them set (as configured in this environment), every module talks to a real, RLS-protected Postgres database.
 

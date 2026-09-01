@@ -25,7 +25,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/goals")({
   beforeLoad: () => requireAuthForPath("/goals"),
   head: () => ({
-    meta: [{ title: "Goals · TeamNest" }],
+    meta: [{ title: "Goals · JeeVijay HRMS" }],
   }),
   component: GoalsPage,
 });

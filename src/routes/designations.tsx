@@ -15,7 +15,7 @@ import { useState } from "react";
 
 export const Route = createFileRoute("/designations")({
   beforeLoad: () => requireAuthForPath("/designations"),
-  head: () => ({ meta: [{ title: "Designations · TeamNest" }] }),
+  head: () => ({ meta: [{ title: "Designations · JeeVijay HRMS" }] }),
   component: DesignationsPage,
 });
 

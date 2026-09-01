@@ -18,7 +18,7 @@ import { settingsService } from "@/services/settingsService";
 export const Route = createFileRoute("/settings")({
   beforeLoad: () => requireAuthForPath("/settings"),
   head: () => ({
-    meta: [{ title: "Settings · TeamNest" }],
+    meta: [{ title: "Settings · JeeVijay HRMS" }],
   }),
   component: SettingsPage,
 });
@@ -85,7 +85,7 @@ function SettingsPage() {
         <TabsContent value="organisation">
           <SectionCard
             title="Company profile"
-                description="Branding and regional defaults shown across TeamNest."
+                description="Branding and regional defaults shown across JeeVijay HRMS."
             bodyClassName="space-y-4 p-5"
           >
             <div className="grid gap-4 sm:grid-cols-2">

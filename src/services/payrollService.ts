@@ -83,7 +83,7 @@ async function buildPayslipPdf(input: {
     y -= 20;
   };
 
-  line("TeamNest", { size: 18, useBold: true, gap: 26 });
+  line("JeeVijay HRMS", { size: 18, useBold: true, gap: 26 });
   line(`Payslip for ${input.period}`, { size: 13, useBold: true, gap: 20 });
   line(`Employee: ${input.employeeName}`, { size: 11, gap: 24 });
 

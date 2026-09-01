@@ -15,20 +15,20 @@ import { Button } from "@/components/ui/button";
 import { attendanceService } from "@/services/attendanceService";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
-import { shortDate } from "@/lib/format";
+import { indianTime, shortDate } from "@/lib/format";
 import type { AttendanceRecord } from "@/types";
 
 export const Route = createFileRoute("/attendance")({
   beforeLoad: () => requireAuthForPath("/attendance"),
   head: () => ({
     meta: [
-      { title: "Attendance & time tracking · TeamNest" },
+      { title: "Attendance & time tracking · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Daily attendance log with check-in and check-out times, worked hours, overtime, WFH and correction requests.",
       },
-      { property: "og:title", content: "Attendance · TeamNest" },
+      { property: "og:title", content: "Attendance · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Track check-ins, worked hours, overtime and attendance corrections.",
@@ -83,8 +83,8 @@ function AttendancePage() {
               ),
             },
           ]),
-      { key: "in", header: "Check in", cell: (row) => <span className="text-sm">{row.checkIn ?? "—"}</span> },
-      { key: "out", header: "Check out", cell: (row) => <span className="text-sm">{row.checkOut ?? "—"}</span> },
+      { key: "in", header: "Check in", cell: (row) => <span className="text-sm">{indianTime(row.checkIn)}</span> },
+      { key: "out", header: "Check out", cell: (row) => <span className="text-sm">{indianTime(row.checkOut)}</span> },
       {
         key: "hours",
         header: "Worked",
@@ -159,7 +159,7 @@ function AttendancePage() {
               <p className="text-muted-foreground">Status</p>
               <StatusBadge status={today.data?.status ?? "week-off"} />
               <p className="text-muted-foreground">
-                In {today.data?.checkIn ?? "—"} · Out {today.data?.checkOut ?? "—"}
+                In {indianTime(today.data?.checkIn)} · Out {indianTime(today.data?.checkOut)}
               </p>
               <p className="text-muted-foreground">Shift {today.data?.shift ?? "—"}</p>
             </div>

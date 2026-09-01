@@ -33,19 +33,19 @@ import { assetService } from "@/services/assetService";
 import { passwordResetRequestService } from "@/services/passwordResetRequestService";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
-import { compactInr, dayMonth, inr, initialsOf, percent, shortDate } from "@/lib/format";
+import { compactInr, dayMonth, indianTime, inr, initialsOf, percent, shortDate } from "@/lib/format";
 
 export const Route = createFileRoute("/")({
   beforeLoad: () => requireAuthForPath("/"),
   head: () => ({
     meta: [
-      { title: "Dashboard · TeamNest" },
+      { title: "Dashboard · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Live workforce dashboard: attendance today, pending approvals, payroll status, hiring pipeline and asset health.",
       },
-      { property: "og:title", content: "TeamNest Dashboard" },
+      { property: "og:title", content: "JeeVijay HRMS Dashboard" },
       {
         property: "og:description",
         content: "Workforce insights, approvals and self-service in one HR command center.",
@@ -481,7 +481,7 @@ function EmployeeDashboard() {
           tone="success"
           hint={
             today.data
-              ? `In ${today.data.checkIn ?? "—"} · Out ${today.data.checkOut ?? "—"}`
+              ? `In ${indianTime(today.data.checkIn)} · Out ${indianTime(today.data.checkOut)}`
               : "No record yet"
           }
         />

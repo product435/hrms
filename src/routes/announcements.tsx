@@ -23,7 +23,7 @@ const ANNOUNCEMENT_PRIORITIES = ["normal", "urgent"];
 export const Route = createFileRoute("/announcements")({
   beforeLoad: () => requireAuthForPath("/announcements"),
   head: () => ({
-    meta: [{ title: "Announcements · TeamNest" }],
+    meta: [{ title: "Announcements · JeeVijay HRMS" }],
   }),
   component: AnnouncementsPage,
 });

@@ -24,13 +24,13 @@ export const Route = createFileRoute("/recruitment")({
   beforeLoad: () => requireAuthForPath("/recruitment"),
   head: () => ({
     meta: [
-      { title: "Recruitment pipeline · TeamNest" },
+      { title: "Recruitment pipeline · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Open requisitions, applicant volume and a stage-by-stage candidate pipeline from applied to hired.",
       },
-      { property: "og:title", content: "Recruitment · TeamNest" },
+      { property: "og:title", content: "Recruitment · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Track requisitions and move candidates through screening, interview and offer.",

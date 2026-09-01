@@ -27,13 +27,13 @@ export const Route = createFileRoute("/assets")({
   beforeLoad: () => requireAuthForPath("/assets"),
   head: () => ({
     meta: [
-      { title: "Asset management · TeamNest" },
+      { title: "Asset management · JeeVijay HRMS" },
       {
         name: "description",
         content:
           "Track company assets by tag and serial, assign or return devices, and log repairs with a full history trail.",
       },
-      { property: "og:title", content: "Asset management · TeamNest" },
+      { property: "og:title", content: "Asset management · JeeVijay HRMS" },
       {
         property: "og:description",
         content: "Assign, return and repair company devices with a complete audit trail.",
