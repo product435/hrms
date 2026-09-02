@@ -1,7 +1,15 @@
 import { assetEvents as fixtureEvents, assets as fixtureAssets } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Asset, AssetEvent, AssetRequest } from "@/types";
-import { currentUserId, fromFixture, logAudit, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
+import {
+  currentUserId,
+  fromFixture,
+  logAudit,
+  matchesSearch,
+  requireEmployeeId,
+  requireOrganizationId,
+  type QueryOptions,
+} from "./api";
 const mapAssetRequest = (r: any): AssetRequest => ({
   id: r.id,
   employeeId: r.employee_id,
@@ -77,7 +85,9 @@ export const assetService = {
       );
     let query = supabase
       .from("assets")
-      .select("*, asset_assignments(employee_id, assigned_at, returned_at, employees(first_name,last_name))")
+      .select(
+        "*, asset_assignments(employee_id, assigned_at, returned_at, employees(first_name,last_name))",
+      )
       .order("name");
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
     if (options.category && options.category !== "all")
@@ -89,8 +99,7 @@ export const assetService = {
       .filter((a) => matchesSearch([a.name, a.tag, a.serial, a.assignedTo], options.search));
   },
   async assignedTo(employeeId: string): Promise<Asset[]> {
-    if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureAssets);
+    if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureAssets);
     const { data: employee, error: employeeError } = await supabase
       .from("employees")
       .select("id")
@@ -108,7 +117,9 @@ export const assetService = {
     if (!assetIds.length) return [];
     const assets = await supabase
       .from("assets")
-      .select("*, asset_assignments(employee_id, assigned_at, returned_at, employees(first_name,last_name))")
+      .select(
+        "*, asset_assignments(employee_id, assigned_at, returned_at, employees(first_name,last_name))",
+      )
       .in("id", assetIds);
     if (assets.error) throw assets.error;
     return (assets.data ?? []).map(mapAsset);
@@ -126,7 +137,10 @@ export const assetService = {
     let repairsQuery = supabase.from("asset_repairs").select("*, assets(asset_code)");
     if (employeeId) {
       assignmentsQuery = assignmentsQuery.eq("employee_id", employeeId);
-      const assignments = await supabase.from("asset_assignments").select("asset_id").eq("employee_id", employeeId);
+      const assignments = await supabase
+        .from("asset_assignments")
+        .select("asset_id")
+        .eq("employee_id", employeeId);
       if (assignments.error) throw assignments.error;
       const ids = (assignments.data ?? []).map((row) => row.asset_id).filter(Boolean);
       if (!ids.length) return [];
@@ -136,7 +150,9 @@ export const assetService = {
     if (assignments.error) throw assignments.error;
     if (repairs.error) throw repairs.error;
     const assignmentEvents: AssetEvent[] = (assignments.data ?? []).flatMap((r: any) => {
-      const holder = r.employees ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim() : "";
+      const holder = r.employees
+        ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim()
+        : "";
       const events: AssetEvent[] = [
         {
           id: `${r.id}-assigned`,
@@ -191,27 +207,20 @@ export const assetService = {
   async markReturned(tag: string) {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ tag, status: "available" as const });
-    const { data, error } = await supabase
-      .from("assets")
-      .update({ status: "available" })
-      .eq("asset_code", tag)
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc("return_asset", { p_asset_code: tag });
     if (error) throw error;
-    void logAudit("asset_return", "assets", data.id, null, { tag, status: "available" });
+    void logAudit("asset_return", "asset_assignments", data, null, { tag, status: "available" });
     return data;
   },
   async sendForRepair(tag: string, note: string) {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture({ tag, note, status: "in-repair" as const });
-    const { data, error } = await supabase
-      .from("assets")
-      .update({ status: "in-repair" })
-      .eq("asset_code", tag)
-      .select()
-      .single();
+    const { data, error } = await supabase.rpc("request_asset_repair", {
+      p_asset_code: tag,
+      p_issue: note,
+    });
     if (error) throw error;
-    void logAudit("asset_repair", "assets", data.id, null, { tag, status: "in-repair" });
+    void logAudit("asset_repair", "asset_repairs", data, null, { tag, status: "in-repair" });
     return data;
   },
   // Employee-initiated ask for a new asset. Deliberately not the same thing
@@ -253,7 +262,11 @@ export const assetService = {
     if (error) throw error;
     return (data ?? []).map(mapAssetRequest);
   },
-  async decideAssetRequest(id: string, decision: "approved" | "rejected", rejectionReason?: string) {
+  async decideAssetRequest(
+    id: string,
+    decision: "approved" | "rejected",
+    rejectionReason?: string,
+  ) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const reviewerId = await currentUserId();
     const { error } = await supabase

@@ -2312,6 +2312,14 @@ export type Database = {
           request_id: string
         }[]
       }
+      request_asset_repair: {
+        Args: { p_asset_code: string; p_issue: string }
+        Returns: string
+      }
+      return_asset: {
+        Args: { p_asset_code: string }
+        Returns: string
+      }
       submit_manager_review: {
         Args: {
           p_feedback?: string
