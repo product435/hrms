@@ -2,24 +2,32 @@ import { useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, FileText, Upload } from "lucide-react";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
-import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { shortDate } from "@/lib/format";
-import { useSession } from "@/hooks/useSession";
-import { workplaceService } from "@/services/workplaceService";
+import { usePermissions } from "@/hooks/usePermissions";
+import { assertAllowedDocument, workplaceService } from "@/services/workplaceService";
 import { employeeService } from "@/services/employeeService";
 import type { DocumentItem } from "@/types";
 
 const DOCUMENT_CATEGORIES = ["Identity", "Education", "Contract", "Policy", "Payroll", "Other"];
+const DOCUMENT_ACCEPT =
+  ".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp";
 
 export const Route = createFileRoute("/documents")({
   beforeLoad: () => requireAuthForPath("/documents"),
@@ -30,10 +38,9 @@ export const Route = createFileRoute("/documents")({
 });
 
 function DocumentsPage() {
-  const { role, user, isLoading } = useSession();
+  const { role, user, isLoading, isDeptHead, isTeamLead } = usePermissions();
   const isSelfService = role === "employee";
   const canManage = role === "admin" || role === "hr";
-  const isTeamView = role === "manager";
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -58,14 +65,21 @@ function DocumentsPage() {
       toast.success("Document uploaded");
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
-    onError: (error) => toast.error("Could not upload document", { description: error instanceof Error ? error.message : "Supabase request failed." }),
+    onError: (error) =>
+      toast.error("Could not upload document", {
+        description: error instanceof Error ? error.message : "Supabase request failed.",
+      }),
   });
 
   const uploadForEmployee = useMutation({
     mutationFn: () => {
       if (!pendingFile) throw new Error("Choose a file to upload.");
       if (!uploadForm.employeeId) throw new Error("Select the employee this document belongs to.");
-      return workplaceService.uploadDocument(pendingFile, uploadForm.employeeId, uploadForm.category);
+      return workplaceService.uploadDocument(
+        pendingFile,
+        uploadForm.employeeId,
+        uploadForm.category,
+      );
     },
     onSuccess: () => {
       toast.success("Document uploaded");
@@ -74,7 +88,10 @@ function DocumentsPage() {
       setUploadForm({ employeeId: "", category: "Other" });
       void queryClient.invalidateQueries({ queryKey: ["documents"] });
     },
-    onError: (error) => toast.error("Could not upload document", { description: error instanceof Error ? error.message : "Supabase request failed." }),
+    onError: (error) =>
+      toast.error("Could not upload document", {
+        description: error instanceof Error ? error.message : "Supabase request failed.",
+      }),
   });
 
   const documents = useQuery({
@@ -104,7 +121,9 @@ function DocumentsPage() {
       }
     },
     onError: (error) =>
-      toast.error("Could not open document", { description: error instanceof Error ? error.message : "Try again." }),
+      toast.error("Could not open document", {
+        description: error instanceof Error ? error.message : "Try again.",
+      }),
   });
 
   const columns = useMemo<Column<DocumentItem>[]>(
@@ -137,28 +156,22 @@ function DocumentsPage() {
         cell: (row) => (row.expiresOn ? shortDate(row.expiresOn) : "—"),
       },
       {
-        key: "verified",
-        header: "Status",
-        cell: (row) => (
-          <StatusBadge status={row.verified ? "verified" : "pending"} tone={row.verified ? "success" : "warning"} />
-        ),
-      },
-      {
         key: "actions",
         header: "Actions",
         align: "right",
         className: "pr-5",
         cell: (row) => (
           <div className="flex justify-end">
-            <Button
-              size="sm"
+            <IconAction
+              label={row.filePath ? "View" : "File not available"}
               variant="outline"
-              disabled={!row.filePath || (viewDocument.isPending && viewDocument.variables === row.filePath)}
+              disabled={
+                !row.filePath || (viewDocument.isPending && viewDocument.variables === row.filePath)
+              }
               onClick={() => row.filePath && viewDocument.mutate(row.filePath)}
-              title={row.filePath ? "View / open document" : "File not available"}
             >
-              <Eye className="size-3.5" /> View
-            </Button>
+              <Eye />
+            </IconAction>
           </div>
         ),
       },
@@ -170,16 +183,46 @@ function DocumentsPage() {
     <AppLayout>
       <PageHeader
         eyebrow="Workplace"
-        title={isSelfService ? "My documents" : isTeamView ? "Team documents" : "Document library"}
+        title={
+          isSelfService
+            ? "My documents"
+            : isDeptHead
+              ? "Department documents"
+              : isTeamLead
+                ? "Team documents"
+                : "Document library"
+        }
         description={
-          isTeamView
-            ? "Documents on file for your direct reports."
-            : "Identity proofs, contracts, policies and payroll documents with verification status."
+          isDeptHead
+            ? "Documents on file for your department."
+            : isTeamLead
+              ? "Documents on file for your direct reports."
+              : "Identity proofs, contracts, policies, and payroll documents."
         }
         actions={
           isSelfService ? (
             <>
-              <input ref={fileInput} type="file" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) upload.mutate(file); }} />
+              <input
+                ref={fileInput}
+                type="file"
+                accept={DOCUMENT_ACCEPT}
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!file) return;
+                  try {
+                    assertAllowedDocument(file);
+                  } catch (error) {
+                    toast.error("Could not upload document", {
+                      description:
+                        error instanceof Error ? error.message : "This file is not allowed.",
+                    });
+                    return;
+                  }
+                  upload.mutate(file);
+                }}
+              />
               <Button onClick={() => fileInput.current?.click()} disabled={upload.isPending}>
                 <Upload className="size-4" /> {upload.isPending ? "Uploading…" : "Upload"}
               </Button>
@@ -217,12 +260,22 @@ function DocumentsPage() {
       ) : documents.isError ? (
         <ErrorState onRetry={() => documents.refetch()} />
       ) : (documents.data ?? []).length === 0 ? (
-        <EmptyState title="No documents" description="Uploaded files will be listed here." icon={FileText} />
+        <EmptyState
+          title="No documents"
+          description="Uploaded files will be listed here."
+          icon={FileText}
+        />
       ) : (
         <DataTable columns={columns} data={documents.data ?? []} rowKey={(row) => row.id} />
       )}
 
-      <Dialog open={uploadOpen} onOpenChange={(open) => { setUploadOpen(open); if (!open) setPendingFile(null); }}>
+      <Dialog
+        open={uploadOpen}
+        onOpenChange={(open) => {
+          setUploadOpen(open);
+          if (!open) setPendingFile(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Upload document</DialogTitle>
@@ -262,9 +315,30 @@ function DocumentsPage() {
               <input
                 ref={managedFileInput}
                 type="file"
+                accept={DOCUMENT_ACCEPT}
                 className="block w-full text-sm"
-                onChange={(event) => setPendingFile(event.target.files?.[0] ?? null)}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (!file) {
+                    setPendingFile(null);
+                    return;
+                  }
+                  try {
+                    assertAllowedDocument(file);
+                    setPendingFile(file);
+                  } catch (error) {
+                    setPendingFile(null);
+                    event.target.value = "";
+                    toast.error("Could not upload document", {
+                      description:
+                        error instanceof Error ? error.message : "This file is not allowed.",
+                    });
+                  }
+                }}
               />
+              <p className="text-xs text-muted-foreground">
+                PDF, PNG, JPEG, or WebP. Maximum 10 MB.
+              </p>
             </div>
           </div>
           <DialogFooter>

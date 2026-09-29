@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarPlus, Check, ClipboardList, X } from "lucide-react";
+import { Ban, CalendarPlus, Check, ClipboardList, X } from "lucide-react";
 import { toast } from "sonner";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
@@ -31,10 +32,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { leaveService } from "@/services/leaveService";
-import { useSession } from "@/hooks/useSession";
+import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { dayMonth, shortDate } from "@/lib/format";
 import type { LeaveRequest } from "@/types";
+
+function errorDescription(error: unknown) {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string" &&
+    error.message.trim()
+  ) {
+    return error.message;
+  }
+  return "Try again.";
+}
 
 export const Route = createFileRoute("/leave")({
   beforeLoad: () => requireAuthForPath("/leave"),
@@ -59,16 +74,19 @@ export const Route = createFileRoute("/leave")({
 });
 
 function LeavePage() {
-  const { role, user } = useSession();
+  const { role, user, canDecideApprovals } = usePermissions();
   const { status: initialStatus } = Route.useSearch();
   const isSelfService = role === "employee";
-  const canDecide = role === "admin" || role === "hr" || role === "manager";
+  const canDecide = canDecideApprovals;
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(initialStatus ?? "all");
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ type: "", from: "", to: "", reason: "" });
+  const [rejectTarget, setRejectTarget] = useState<LeaveRequest | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
   const leaveTypes = useQuery({ queryKey: ["leave-types"], queryFn: () => leaveService.types() });
   useEffect(() => {
     const firstType = leaveTypes.data?.[0]?.name;
@@ -102,18 +120,45 @@ function LeavePage() {
       setForm({ type: leaveTypes.data?.[0]?.name ?? "", from: "", to: "", reason: "" });
       queryClient.invalidateQueries({ queryKey: ["leave"] });
       queryClient.invalidateQueries({ queryKey: ["leave-balance"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-ledger"] });
     },
-    onError: (error) => toast.error("Could not submit the request", { description: error instanceof Error ? error.message : "Try again." }),
+    onError: (error) =>
+      toast.error("Could not submit the request", { description: errorDescription(error) }),
   });
 
   const decide = useMutation({
-    mutationFn: ({ id, decision }: { id: string; decision: "approved" | "rejected" }) =>
-      leaveService.decide(id, decision),
+    mutationFn: ({
+      id,
+      decision,
+      rejectionReason: reason,
+    }: {
+      id: string;
+      decision: "approved" | "rejected";
+      rejectionReason?: string;
+    }) => leaveService.decide(id, decision, reason),
     onSuccess: (_data, variables) => {
       toast.success(`Request ${variables.decision}`);
+      setRejectTarget(null);
+      setRejectionReason("");
       queryClient.invalidateQueries({ queryKey: ["leave"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-balance"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-ledger"] });
     },
-    onError: (error) => toast.error("Could not record the decision", { description: error instanceof Error ? error.message : "Try again." }),
+    onError: (error) =>
+      toast.error("Could not record the decision", { description: errorDescription(error) }),
+  });
+
+  const cancel = useMutation({
+    mutationFn: ({ id }: { id: string; withdrew: boolean }) => leaveService.cancel(id),
+    onSuccess: (_data, variables) => {
+      toast.success(variables.withdrew ? "Leave request withdrawn" : "Leave request cancelled");
+      setCancelTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["leave"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-balance"] });
+      queryClient.invalidateQueries({ queryKey: ["leave-ledger"] });
+    },
+    onError: (error) =>
+      toast.error("Could not cancel the request", { description: errorDescription(error) }),
   });
 
   const columns = useMemo<Column<LeaveRequest>[]>(
@@ -139,53 +184,86 @@ function LeavePage() {
           </span>
         ),
       },
-      { key: "days", header: "Days", align: "right", cell: (row) => <span className="text-sm">{row.days}</span> },
+      {
+        key: "days",
+        header: "Days",
+        align: "right",
+        cell: (row) => <span className="text-sm">{row.days}</span>,
+      },
       {
         key: "reason",
         header: "Reason",
-        cell: (row) => <span className="line-clamp-1 text-sm text-muted-foreground">{row.reason}</span>,
+        cell: (row) => (
+          <span className="line-clamp-1 text-sm text-muted-foreground">{row.reason}</span>
+        ),
       },
-      { key: "applied", header: "Applied", cell: (row) => <span className="text-sm">{shortDate(row.appliedOn)}</span> },
-      { key: "approver", header: "Approver", cell: (row) => <span className="text-sm">{row.approver}</span> },
+      {
+        key: "applied",
+        header: "Applied",
+        cell: (row) => <span className="text-sm">{shortDate(row.appliedOn)}</span>,
+      },
+      {
+        key: "approver",
+        header: "Approver",
+        cell: (row) => <span className="text-sm">{row.approver}</span>,
+      },
       { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
-      ...(canDecide
+      ...(isSelfService || canDecide
         ? [
             {
               key: "actions",
-              header: "Decision",
+              header: "Actions",
               align: "right" as const,
               className: "pr-5",
               cell: (row: LeaveRequest) => {
-                // A manager's own request is visible in this list (it's
-                // still their leave), but RLS deliberately blocks deciding
-                // on your own request -- only a direct report's -- so the
-                // action buttons are hidden rather than offering a decision
-                // that will always be rejected server-side.
+                // A manager's own request stays in this list, but deciding it
+                // is refused server-side. The owner withdraws or cancels on
+                // the self path. Approve and reject stay on someone else's
+                // pending request only.
                 const isOwnRequest = row.employeeId === (user.employeeId ?? user.id);
-                if (row.status !== "pending") {
+                const canDecideThis = canDecide && !isOwnRequest && row.status === "pending";
+                const canCancelThis =
+                  (row.status === "pending" || row.status === "approved") &&
+                  (isOwnRequest || canDecide);
+                const withdrawing = isOwnRequest && row.status === "pending";
+                if (!canDecideThis && !canCancelThis) {
                   return <span className="text-xs text-muted-foreground">Closed</span>;
-                }
-                if (isOwnRequest) {
-                  return <span className="text-xs text-muted-foreground">Awaiting approver</span>;
                 }
                 return (
                   <div className="flex justify-end gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ id: row.id, decision: "approved" })}
-                    >
-                      <Check className="size-3.5" /> Approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={decide.isPending}
-                      onClick={() => decide.mutate({ id: row.id, decision: "rejected" })}
-                    >
-                      <X className="size-3.5" /> Reject
-                    </Button>
+                    {canDecideThis ? (
+                      <>
+                        <IconAction
+                          label="Approve"
+                          variant="outline"
+                          disabled={decide.isPending || cancel.isPending}
+                          onClick={() => decide.mutate({ id: row.id, decision: "approved" })}
+                        >
+                          <Check />
+                        </IconAction>
+                        <IconAction
+                          label="Reject"
+                          variant="ghost"
+                          disabled={decide.isPending || cancel.isPending}
+                          onClick={() => {
+                            setRejectionReason("");
+                            setRejectTarget(row);
+                          }}
+                        >
+                          <X />
+                        </IconAction>
+                      </>
+                    ) : null}
+                    {canCancelThis ? (
+                      <IconAction
+                        label={withdrawing ? "Withdraw" : "Cancel"}
+                        variant="ghost"
+                        disabled={decide.isPending || cancel.isPending}
+                        onClick={() => setCancelTarget(row)}
+                      >
+                        <Ban />
+                      </IconAction>
+                    ) : null}
                   </div>
                 );
               },
@@ -193,7 +271,7 @@ function LeavePage() {
           ]
         : []),
     ],
-    [canDecide, decide, isSelfService, user],
+    [canDecide, cancel.isPending, decide, isSelfService, user],
   );
 
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
@@ -205,8 +283,8 @@ function LeavePage() {
         title={isSelfService ? "My leave" : "Leave management"}
         description={
           isSelfService
-            ? "Track your balance, apply for time off and follow approval status."
-            : "Review, approve or reject leave requests and monitor team availability."
+            ? "Track your balance, apply for time off, and withdraw or cancel a request."
+            : "Review, approve, reject, or cancel leave requests and monitor team availability."
         }
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
@@ -248,7 +326,9 @@ function LeavePage() {
                       id="leave-from"
                       type="date"
                       value={form.from}
-                      onChange={(event) => setForm((prev) => ({ ...prev, from: event.target.value }))}
+                      onChange={(event) =>
+                        setForm((prev) => ({ ...prev, from: event.target.value }))
+                      }
                     />
                   </div>
                   <div className="grid gap-2">
@@ -267,7 +347,9 @@ function LeavePage() {
                     id="leave-reason"
                     value={form.reason}
                     placeholder="Add context for your approver"
-                    onChange={(event) => setForm((prev) => ({ ...prev, reason: event.target.value }))}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, reason: event.target.value }))
+                    }
                   />
                 </div>
               </div>
@@ -301,19 +383,40 @@ function LeavePage() {
             />
           );
         })}
-        <StatCard label="Pending" value={String(pendingCount)} icon={ClipboardList} tone="warning" hint="in current view" />
+        <StatCard
+          label="Pending"
+          value={String(pendingCount)}
+          icon={ClipboardList}
+          tone="warning"
+          hint="in current view"
+        />
       </div>
 
       {(ledger.data ?? []).length > 0 ? (
-        <SectionCard title="Leave ledger" description="Your balance transaction history" bodyClassName="divide-y divide-border p-0">
+        <SectionCard
+          title="Leave ledger"
+          description="Your balance transaction history"
+          bodyClassName="divide-y divide-border p-0"
+        >
           <ul>
             {ledger.data!.slice(0, 8).map((entry) => (
-              <li key={entry.id} className="flex items-center justify-between gap-3 px-5 py-3 text-sm">
+              <li
+                key={entry.id}
+                className="flex items-center justify-between gap-3 px-5 py-3 text-sm"
+              >
                 <div>
                   <p className="font-medium">{entry.typeName}</p>
-                  <p className="text-xs text-muted-foreground">{entry.reason} · {shortDate(entry.createdAt)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {entry.reason} · {shortDate(entry.createdAt)}
+                  </p>
                 </div>
-                <span className={entry.changeDays < 0 ? "font-semibold text-destructive" : "font-semibold text-emerald-600"}>
+                <span
+                  className={
+                    entry.changeDays < 0
+                      ? "font-semibold text-destructive"
+                      : "font-semibold text-emerald-600"
+                  }
+                >
                   {entry.changeDays > 0 ? "+" : ""}
                   {entry.changeDays}
                 </span>
@@ -356,6 +459,109 @@ function LeavePage() {
           />
         }
       />
+
+      <Dialog
+        open={rejectTarget !== null}
+        onOpenChange={(next) => {
+          if (!next && !decide.isPending) {
+            setRejectTarget(null);
+            setRejectionReason("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reject leave request</DialogTitle>
+            <DialogDescription>
+              {rejectTarget
+                ? `${rejectTarget.employeeName || "This employee"} · ${dayMonth(rejectTarget.from)} – ${dayMonth(rejectTarget.to)}`
+                : "A reason is required."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="leave-rejection-reason">Rejection reason</Label>
+            <Textarea
+              id="leave-rejection-reason"
+              value={rejectionReason}
+              placeholder="Tell the employee why this request is rejected"
+              onChange={(event) => setRejectionReason(event.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRejectTarget(null);
+                setRejectionReason("");
+              }}
+              disabled={decide.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!rejectTarget || !rejectionReason.trim()) return;
+                decide.mutate({
+                  id: rejectTarget.id,
+                  decision: "rejected",
+                  rejectionReason: rejectionReason.trim(),
+                });
+              }}
+              disabled={decide.isPending || !rejectionReason.trim()}
+            >
+              Reject request
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={cancelTarget !== null}
+        onOpenChange={(next) => {
+          if (!next && !cancel.isPending) setCancelTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {cancelTarget?.employeeId === (user.employeeId ?? user.id) &&
+              cancelTarget?.status === "pending"
+                ? "Withdraw leave request"
+                : "Cancel leave request"}
+            </DialogTitle>
+            <DialogDescription>
+              {cancelTarget
+                ? `${cancelTarget.employeeName || "This request"} · ${dayMonth(cancelTarget.from)} – ${dayMonth(cancelTarget.to)}. The days go back to the leave balance.`
+                : "The days go back to the leave balance."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setCancelTarget(null)}
+              disabled={cancel.isPending}
+            >
+              Keep request
+            </Button>
+            <Button
+              onClick={() => {
+                if (!cancelTarget) return;
+                const isOwnRequest = cancelTarget.employeeId === (user.employeeId ?? user.id);
+                cancel.mutate({
+                  id: cancelTarget.id,
+                  withdrew: isOwnRequest && cancelTarget.status === "pending",
+                });
+              }}
+              disabled={cancel.isPending}
+            >
+              {cancelTarget?.employeeId === (user.employeeId ?? user.id) &&
+              cancelTarget?.status === "pending"
+                ? "Withdraw request"
+                : "Cancel request"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

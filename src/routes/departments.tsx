@@ -10,7 +10,13 @@ import { DistributionDonut } from "@/components/charts/DistributionDonut";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { employeeService } from "@/services/employeeService";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -37,9 +43,31 @@ export const Route = createFileRoute("/departments")({
 });
 
 function DepartmentsPage() {
-  const [open, setOpen] = useState(false); const [name, setName] = useState(""); const [code, setCode] = useState(""); const queryClient = useQueryClient();
-  const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
-  const create = useMutation({ mutationFn: () => { if (!name.trim()) throw new Error("Department name is required."); return employeeService.createDepartment({ name, code }); }, onSuccess: () => { toast.success("Department created"); setName(""); setCode(""); setOpen(false); void queryClient.invalidateQueries({ queryKey: ["departments"] }); }, onError: (e) => toast.error("Could not create department", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const queryClient = useQueryClient();
+  const departments = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => employeeService.departments(),
+  });
+  const create = useMutation({
+    mutationFn: () => {
+      if (!name.trim()) throw new Error("Department name is required.");
+      return employeeService.createDepartment({ name, code });
+    },
+    onSuccess: () => {
+      toast.success("Department created");
+      setName("");
+      setCode("");
+      setOpen(false);
+      void queryClient.invalidateQueries({ queryKey: ["departments"] });
+    },
+    onError: (e) =>
+      toast.error("Could not create department", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
 
   return (
     <AppLayout>
@@ -112,11 +140,35 @@ function DepartmentsPage() {
               data={departments.data.map((d) => ({ name: d.name, value: d.headcount }))}
             />
           ) : (
-            <div className="h-[300px]" />
+            <div className="h-75" />
           )}
         </SectionCard>
       </div>
-      <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>New department</DialogTitle></DialogHeader><div className="space-y-3"><div><Label>Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div><div><Label>Code</Label><Input value={code} onChange={(e) => setCode(e.target.value)} /></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => create.mutate()} disabled={create.isPending}>{create.isPending ? "Saving…" : "Create department"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New department</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Name</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <Label>Code</Label>
+              <Input value={code} onChange={(e) => setCode(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => create.mutate()} disabled={create.isPending}>
+              {create.isPending ? "Saving…" : "Create department"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

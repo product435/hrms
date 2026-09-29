@@ -46,6 +46,8 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   delayed: "danger",
   lost: "danger",
   resigned: "danger",
+  suspended: "danger",
+  terminated: "danger",
   critical: "danger",
   urgent: "danger",
   damaged: "danger",

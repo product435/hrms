@@ -1,8 +1,91 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import { departments as fixtureDepartments, employees as fixtureEmployees } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import type { Department, Employee, Role } from "@/types";
-import { fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import {
+  BLOOD_GROUPS,
+  GENDERS,
+  MARITAL_STATUSES,
+  emailHasDomain,
+  isIndianMobile,
+} from "@/lib/onboarding-schema";
+import { normalizeRole } from "@/lib/roles";
+import type { Department, Employee } from "@/types";
+import {
+  fromFixture,
+  logAudit,
+  matchesSearch,
+  requireOrganizationId,
+  type QueryOptions,
+} from "./api";
+import { indiaDateKey } from "@/lib/format";
 import { displayName, normalizeKey } from "@/lib/normalize";
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Decide the exit_date column for an employment status change.
+ * undefined means leave the stored date untouched.
+ */
+export function resolveEmploymentExitDate(input: {
+  nextStatus: string;
+  previousStatus: string | null;
+  previousExitDate: string | null;
+  exitDate?: string;
+  today: string;
+}): string | null | undefined {
+  const next = input.nextStatus.trim();
+  const previous = (input.previousStatus ?? "").trim();
+  const provided = (input.exitDate ?? "").trim();
+  if (provided && !ISO_DATE.test(provided)) {
+    throw new Error("Enter an exit date as YYYY-MM-DD.");
+  }
+  const previousExit = input.previousExitDate?.trim() || null;
+
+  if (next === "terminated" || next === "suspended") {
+    const exitDate = provided || previousExit || input.today;
+    if (next === "terminated" && !exitDate) {
+      throw new Error("Terminated employees need an exit date.");
+    }
+    return exitDate;
+  }
+  if (next === "resigned") {
+    return provided || null;
+  }
+  if (next === "active" && previous === "suspended") {
+    return null;
+  }
+  return undefined;
+}
+
+const EMPLOYMENT_TYPES = new Set(["full-time", "part-time", "contract", "intern"]);
+
+function listedOrEmpty(value: string | undefined, allowed: readonly string[], label: string) {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!allowed.includes(trimmed)) throw new Error(`Select a ${label}.`);
+  return trimmed;
+}
+
+function mobileOrEmpty(value: string | undefined) {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!isIndianMobile(trimmed)) throw new Error("Enter a 10-digit mobile number.");
+  return trimmed;
+}
+
+function exactIlike(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+function duplicateEmployeeMessage(error: { code?: string; message?: string }) {
+  if (error.code !== "23505") return null;
+  const message = (error.message ?? "").toLowerCase();
+  if (message.includes("email")) return "An employee with this work email already exists.";
+  if (message.includes("employee_code")) return "That employee code is already in use.";
+  return "An employee with those details already exists.";
+}
 
 function mapEmployee(row: any): Employee {
   const department = row.departments?.name ?? row.department ?? "";
@@ -22,7 +105,7 @@ function mapEmployee(row: any): Employee {
     avatarUrl: row.profiles?.avatar_url ?? undefined,
     department,
     designation,
-    role: (row.profiles?.role ?? "employee") as Role,
+    role: normalizeRole(row.profiles?.role) ?? "employee",
     managerName: row.manager
       ? `${row.manager.first_name ?? ""} ${row.manager.last_name ?? ""}`.trim()
       : null,
@@ -37,12 +120,21 @@ function mapEmployee(row: any): Employee {
     bloodGroup: row.blood_group ?? "",
     maritalStatus: row.marital_status ?? "",
     address: primaryAddress
-      ? [primaryAddress.address_line1, primaryAddress.city, primaryAddress.state, primaryAddress.postal_code]
+      ? [
+          primaryAddress.address_line1,
+          primaryAddress.city,
+          primaryAddress.state,
+          primaryAddress.postal_code,
+        ]
           .filter(Boolean)
           .join(", ")
       : "",
     emergencyContact: primaryContact
-      ? { name: primaryContact.name ?? "", relation: primaryContact.relationship ?? "", phone: primaryContact.phone ?? "" }
+      ? {
+          name: primaryContact.name ?? "",
+          relation: primaryContact.relationship ?? "",
+          phone: primaryContact.phone ?? "",
+        }
       : { name: "", relation: "", phone: "" },
     bank: primaryBank
       ? {
@@ -72,28 +164,69 @@ export const employeeService = {
     bloodGroup?: string;
   }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const firstName = input.firstName.trim();
+    const lastName = input.lastName.trim();
+    const email = input.email.trim().toLowerCase();
+    const employeeCode = input.employeeCode.trim();
+    const employmentType = input.employmentType.trim();
+    if (!firstName || !lastName || !employeeCode || !input.joiningDate) {
+      throw new Error(
+        "First name, last name, work email, employee code, and joining date are required.",
+      );
+    }
+    if (!emailHasDomain(email)) throw new Error("Enter a valid work email.");
+    if (!input.departmentId) throw new Error("Department is required.");
+    if (!EMPLOYMENT_TYPES.has(employmentType)) throw new Error("Employment type is required.");
+
+    const duplicateEmail = await supabase
+      .from("employees")
+      .select("id")
+      .ilike("email", exactIlike(email))
+      .limit(1);
+    if (duplicateEmail.error) throw duplicateEmail.error;
+    if ((duplicateEmail.data ?? []).length > 0) {
+      throw new Error("An employee with this work email already exists.");
+    }
+
+    const duplicateCode = await supabase
+      .from("employees")
+      .select("id")
+      .eq("employee_code", employeeCode)
+      .limit(1);
+    if (duplicateCode.error) throw duplicateCode.error;
+    if ((duplicateCode.data ?? []).length > 0) {
+      throw new Error("That employee code is already in use.");
+    }
+
+    const bloodGroup = listedOrEmpty(input.bloodGroup ?? "", BLOOD_GROUPS, "blood group");
+
     const organizationId = await requireOrganizationId();
     const { data, error } = await supabase
       .from("employees")
       .insert({
         organization_id: organizationId,
-        first_name: input.firstName.trim(),
-        last_name: input.lastName.trim(),
-        email: input.email.trim().toLowerCase(),
-        employee_code: input.employeeCode.trim(),
-        department_id: input.departmentId || null,
+        profile_id: null,
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        employee_code: employeeCode,
+        department_id: input.departmentId,
         designation_id: input.designationId || null,
-        employment_type: input.employmentType,
-        employment_status: "active",
+        employment_type: employmentType,
+        employment_status: "pending_approval",
         joining_date: input.joiningDate,
         manager_id: input.managerId || null,
-        blood_group: input.bloodGroup?.trim() || null,
+        blood_group: bloodGroup ?? null,
       })
       .select("id")
       .single();
-    if (error) throw error;
-    void logAudit("employee_create", "employees", data.id, null, { employee_code: input.employeeCode, email: input.email });
-    return data;
+    if (error) throw duplicateEmployeeMessage(error) ?? error;
+    if (!data) throw new Error("Employee was not created.");
+    void logAudit("employee_create", "employees", data.id, null, {
+      employee_code: employeeCode,
+      email,
+    });
+    return { id: data.id, email };
   },
   async update(
     id: string,
@@ -110,34 +243,83 @@ export const employeeService = {
       designationId?: string;
       employmentType?: string;
       status?: string;
-      // Real exit/termination date -- only meaningful (and only ever sent
-      // by the UI) when status is being set to "resigned". Superscedes the
-      // old updated_at-based approximation the Dashboard used to fall back
-      // to for the "Joiners vs exits" chart and attrition rate.
+      // Exit date is stored for resigned, suspended, and terminated.
+      // Suspended and terminated fill today (Asia/Kolkata) when it is empty.
+      // Moving a suspended employee back to active clears a mistaken date.
+      // Leaving resigned or terminated keeps the date unless this call is
+      // still saving status "resigned" with an empty exit date.
       exitDate?: string;
     },
   ) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase
+    const nextStatus = input.status?.trim();
+    let previousStatus: string | null = null;
+    let previousExit: string | null = null;
+    let exitDateDecision: string | null | undefined;
+    if (nextStatus !== undefined) {
+      const current = await supabase
+        .from("employees")
+        .select("employment_status, exit_date")
+        .eq("id", id)
+        .maybeSingle();
+      if (current.error) throw current.error;
+      if (!current.data) throw new Error("Employee was not found.");
+      previousStatus = current.data.employment_status;
+      previousExit = current.data.exit_date;
+      exitDateDecision = resolveEmploymentExitDate({
+        nextStatus,
+        previousStatus,
+        previousExitDate: previousExit,
+        today: indiaDateKey(),
+        ...(input.exitDate !== undefined ? { exitDate: input.exitDate } : {}),
+      });
+    }
+    const phone = mobileOrEmpty(input.phone);
+    const gender = listedOrEmpty(input.gender, GENDERS, "gender");
+    const bloodGroup = listedOrEmpty(input.bloodGroup, BLOOD_GROUPS, "blood group");
+    const maritalStatus = listedOrEmpty(input.maritalStatus, MARITAL_STATUSES, "marital status");
+    const { data, error } = await supabase
       .from("employees")
       .update({
         ...(input.firstName !== undefined ? { first_name: input.firstName.trim() } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName.trim() } : {}),
-        ...(input.phone !== undefined ? { phone: input.phone.trim() || null } : {}),
-        ...(input.gender !== undefined ? { gender: input.gender || null } : {}),
+        ...(phone !== undefined ? { phone } : {}),
+        ...(gender !== undefined ? { gender } : {}),
         ...(input.dateOfBirth !== undefined ? { date_of_birth: input.dateOfBirth || null } : {}),
-        ...(input.bloodGroup !== undefined ? { blood_group: input.bloodGroup.trim() || null } : {}),
-        ...(input.maritalStatus !== undefined ? { marital_status: input.maritalStatus || null } : {}),
-        ...(input.workLocation !== undefined ? { work_location: input.workLocation.trim() || null } : {}),
+        ...(bloodGroup !== undefined ? { blood_group: bloodGroup } : {}),
+        ...(maritalStatus !== undefined ? { marital_status: maritalStatus } : {}),
+        ...(input.workLocation !== undefined
+          ? { work_location: input.workLocation.trim() || null }
+          : {}),
         ...(input.departmentId !== undefined ? { department_id: input.departmentId || null } : {}),
-        ...(input.designationId !== undefined ? { designation_id: input.designationId || null } : {}),
+        ...(input.designationId !== undefined
+          ? { designation_id: input.designationId || null }
+          : {}),
         ...(input.employmentType !== undefined ? { employment_type: input.employmentType } : {}),
-        ...(input.status !== undefined ? { employment_status: input.status } : {}),
-        ...(input.status !== undefined ? { exit_date: input.status === "resigned" ? input.exitDate || null : null } : {}),
+        ...(nextStatus !== undefined ? { employment_status: nextStatus } : {}),
+        ...(exitDateDecision !== undefined ? { exit_date: exitDateDecision } : {}),
       })
-      .eq("id", id);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
     if (error) throw error;
-    void logAudit("employee_update", "employees", id, null, input as Record<string, unknown>);
+    if (!data) throw new Error("You do not have permission to update this employee.");
+    void logAudit(
+      "employee_update",
+      "employees",
+      id,
+      nextStatus !== undefined
+        ? { employment_status: previousStatus, exit_date: previousExit }
+        : null,
+      nextStatus !== undefined
+        ? {
+            ...input,
+            status: nextStatus,
+            employment_status: nextStatus,
+            exit_date: exitDateDecision === undefined ? previousExit : exitDateDecision,
+          }
+        : (input as Record<string, unknown>),
+    );
   },
   async list(options: QueryOptions = {}): Promise<Employee[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -165,7 +347,9 @@ export const employeeService = {
     if (options.status && options.status !== "all")
       query = query.eq("employment_status", options.status);
     if (options.search)
-      query = query.or(`first_name.ilike.%${options.search}%,last_name.ilike.%${options.search}%,email.ilike.%${options.search}%,employee_code.ilike.%${options.search}%`);
+      query = query.or(
+        `first_name.ilike.%${options.search}%,last_name.ilike.%${options.search}%,email.ilike.%${options.search}%,employee_code.ilike.%${options.search}%`,
+      );
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
@@ -219,7 +403,8 @@ export const employeeService = {
     if (employees.error) throw employees.error;
     const counts = new Map<string, number>();
     (employees.data ?? []).forEach((row: any) => {
-      if (row.department_id) counts.set(row.department_id, (counts.get(row.department_id) ?? 0) + 1);
+      if (row.department_id)
+        counts.set(row.department_id, (counts.get(row.department_id) ?? 0) + 1);
     });
     const grouped = new Map<string, Department>();
     (data ?? []).forEach((row: any) => {
@@ -270,6 +455,17 @@ export const employeeService = {
       .single();
     if (error) throw error;
     return data;
+  },
+  async designationOptions(): Promise<{ id: string; name: string }[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase
+      .from("designations")
+      .select("id,name,is_active")
+      .order("name");
+    if (error) throw error;
+    return (data ?? [])
+      .filter((row) => row.is_active !== false && row.id && row.name)
+      .map((row) => ({ id: row.id, name: displayName(row.name ?? "") }));
   },
   async designations(): Promise<string[]> {
     if (!isSupabaseConfigured || !supabase)

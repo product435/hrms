@@ -1,7 +1,13 @@
 import { isSupabaseConfigured, supabase, type SupabaseClientLike } from "@/lib/supabase";
 import type { User as SupabaseUser } from "@supabase/supabase-js";
+import { ATTENDANCE_ROUTE_ROLES } from "@/lib/nav-fragments/attendance";
+import { kraNavItem } from "@/lib/nav-fragments/kra";
+import { onboardingRouteRoles } from "@/lib/nav-fragments/onboarding";
+import { workNavItem } from "@/lib/nav-fragments/work";
+import { ALL_ROLES, normalizeRole, STAFF_ROLES } from "@/lib/roles";
 import type { Role, SessionUser } from "@/types";
 import { isValidEmail, sanitizeEmail } from "@/lib/email";
+import { isStrongPassword } from "@/lib/password";
 import { logAudit } from "./api";
 
 // Supabase auth errors carry a machine-readable `code` in current supabase-js
@@ -74,7 +80,149 @@ const listeners = new Set<SessionListener>();
 let currentSession: AuthSession | null = null;
 let supabaseSubscription: { unsubscribe: () => void } | null = null;
 let signOutInProgress = false;
+let sessionEpoch = 0;
 let signOutPromise: Promise<{ error?: AuthError }> | null = null;
+let employmentBlockNotice: string | null = null;
+
+const BLOCKED_EMPLOYMENT_STATUSES = new Set([
+  "resigned",
+  "terminated",
+  "inactive",
+  "rejected",
+  "exited",
+  "suspended",
+]);
+
+export const EMPLOYMENT_BLOCKED_MESSAGE =
+  "This account cannot sign in because the employee is not allowed to work. Contact an administrator.";
+
+export class EmploymentAccessError extends Error {
+  constructor() {
+    super(EMPLOYMENT_BLOCKED_MESSAGE);
+    this.name = "EmploymentAccessError";
+  }
+}
+
+export function isEmploymentAccessError(error: unknown): error is EmploymentAccessError {
+  return (
+    error instanceof EmploymentAccessError ||
+    (error instanceof Error && error.name === "EmploymentAccessError")
+  );
+}
+
+export function hasEmploymentBlockNotice(): boolean {
+  return employmentBlockNotice !== null;
+}
+
+export function consumeEmploymentBlockNotice(): string | null {
+  const notice = employmentBlockNotice;
+  employmentBlockNotice = null;
+  return notice;
+}
+
+function normalizeEmploymentStatus(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const status = value.trim().toLowerCase();
+  return status || null;
+}
+
+async function linkedEmploymentStatus(
+  client: NonNullable<SupabaseClientLike>,
+  userId: string,
+  employeeId?: string | null,
+): Promise<string | null> {
+  const byProfile = await client
+    .from("employees")
+    .select("employment_status")
+    .eq("profile_id", userId)
+    .maybeSingle();
+  if (!byProfile.error) {
+    const status = normalizeEmploymentStatus(byProfile.data?.employment_status);
+    if (status) return status;
+  }
+  if (!employeeId) return null;
+  const byId = await client
+    .from("employees")
+    .select("employment_status")
+    .eq("id", employeeId)
+    .maybeSingle();
+  if (byId.error) return null;
+  return normalizeEmploymentStatus(byId.data?.employment_status);
+}
+
+async function denyEmploymentAccess(client: NonNullable<SupabaseClientLike>): Promise<never> {
+  if (typeof window !== "undefined") {
+    employmentBlockNotice = EMPLOYMENT_BLOCKED_MESSAGE;
+    signOutInProgress = true;
+  }
+  try {
+    await client.auth.signOut();
+  } catch {
+    // The block still applies when the auth call fails.
+  } finally {
+    if (typeof window !== "undefined") {
+      signOutInProgress = false;
+      writeSession(null);
+    }
+  }
+  throw new EmploymentAccessError();
+}
+
+const recoveryModuleStarted = Date.now();
+
+function locationHasRecoveryCredentials(): boolean {
+  if (typeof window === "undefined") return false;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const search = new URLSearchParams(window.location.search);
+  const type = hash.get("type") ?? search.get("type");
+  if (type !== "recovery") return false;
+  return Boolean(
+    hash.get("access_token") ||
+    hash.get("token") ||
+    hash.get("token_hash") ||
+    search.get("code") ||
+    search.get("token") ||
+    search.get("token_hash"),
+  );
+}
+
+const recoveryCredentialsOnStartup = locationHasRecoveryCredentials();
+let recoveryEventAt = 0;
+
+function noteRecoveryEvent() {
+  recoveryEventAt = Date.now();
+}
+
+export function hasPasswordRecoveryEvent(): boolean {
+  return recoveryEventAt > 0 && Date.now() - recoveryEventAt < 60_000;
+}
+
+export function openedWithRecoveryCredentials(): boolean {
+  return recoveryCredentialsOnStartup;
+}
+
+export function passwordRecoveryRedirect(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  const url = new URL("/reset-password", window.location.origin);
+  url.searchParams.set("type", "recovery");
+  return url.toString();
+}
+
+if (typeof window !== "undefined" && supabase) {
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+      noteRecoveryEvent();
+      return;
+    }
+    if (
+      event === "SIGNED_IN" &&
+      recoveryCredentialsOnStartup &&
+      Date.now() - recoveryModuleStarted < 15_000
+    ) {
+      noteRecoveryEvent();
+    }
+  });
+}
 
 function writeSession(session: AuthSession | null) {
   currentSession = session;
@@ -82,14 +230,7 @@ function writeSession(session: AuthSession | null) {
 }
 
 function roleFromValue(value: unknown): Role | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.toLowerCase();
-  return normalized === "admin" ||
-    normalized === "hr" ||
-    normalized === "manager" ||
-    normalized === "employee"
-    ? normalized
-    : null;
+  return normalizeRole(value);
 }
 
 export async function sessionForUser(
@@ -147,6 +288,12 @@ export async function sessionForUser(
       "No profile record was found for this Supabase user. Contact an administrator.",
     );
   }
+  if (client) {
+    const employmentStatus = await linkedEmploymentStatus(client, user.id, profile.employee_id);
+    if (employmentStatus && BLOCKED_EMPLOYMENT_STATUSES.has(employmentStatus)) {
+      await denyEmploymentAccess(client);
+    }
+  }
   const role = roleFromValue(profile.role) ?? roleFromValue(roleRecord?.name);
   if (!role) {
     throw new Error("Your profile is missing a valid application role. Contact an administrator.");
@@ -179,9 +326,16 @@ function ensureSupabaseListener() {
   if (!supabase || supabaseSubscription) return;
   supabaseSubscription = supabase.auth.onAuthStateChange((_event, session) => {
     if (signOutInProgress) return;
+    const epoch = sessionEpoch;
     void sessionForUser(supabase, session?.user ?? null)
-      .then(writeSession)
-      .catch(() => writeSession(null));
+      .then((next) => {
+        if (signOutInProgress || epoch !== sessionEpoch) return;
+        writeSession(next);
+      })
+      .catch(() => {
+        if (signOutInProgress || epoch !== sessionEpoch) return;
+        writeSession(null);
+      });
   }).data.subscription;
 }
 
@@ -196,7 +350,9 @@ async function initializeSession() {
   let session: AuthSession | null = null;
   try {
     session = await sessionForUser(supabase, data.session?.user ?? null);
-  } catch {
+  } catch (error) {
+    writeSession(null);
+    if (isEmploymentAccessError(error)) throw error;
     session = null;
   }
   writeSession(session);
@@ -204,28 +360,33 @@ async function initializeSession() {
 }
 
 export const ROUTE_ROLES: Record<string, Role[]> = {
-  "/": ["admin", "hr", "manager", "employee"],
-  "/announcements": ["admin", "hr", "manager", "employee"],
-  "/notifications": ["admin", "hr", "manager", "employee"],
-  "/employees": ["admin", "hr", "manager"],
-  "/employees/$employeeId": ["admin", "hr", "manager", "employee"],
-  "/departments": ["admin", "hr", "manager"],
-  "/designations": ["admin", "hr", "manager"],
+  "/": ALL_ROLES,
+  "/announcements": ALL_ROLES,
+  "/notifications": ALL_ROLES,
+  "/employees": STAFF_ROLES,
+  "/employees/$employeeId": ALL_ROLES,
+  "/departments": STAFF_ROLES,
+  "/designations": STAFF_ROLES,
   "/onboarding": ["admin", "hr"],
   "/recruitment": ["admin", "hr"],
-  "/attendance": ["admin", "hr", "manager", "employee"],
-  "/shifts": ["admin", "hr", "manager"],
-  "/leave": ["admin", "hr", "manager", "employee"],
+  "/attendance": ATTENDANCE_ROUTE_ROLES,
+  "/work": workNavItem.roles,
+  "/shifts": STAFF_ROLES,
+  "/leave": ALL_ROLES,
   "/payroll": ["admin", "hr", "employee"],
-  "/expenses": ["admin", "hr", "manager", "employee"],
-  "/goals": ["admin", "hr", "manager", "employee"],
-  "/performance": ["admin", "hr", "manager", "employee"],
-  "/assets": ["admin", "hr", "manager", "employee"],
-  "/documents": ["admin", "hr", "manager", "employee"],
-  "/helpdesk": ["admin", "hr", "manager", "employee"],
-  "/reports": ["admin", "hr", "manager"],
+  "/expenses": ALL_ROLES,
+  "/goals": ALL_ROLES,
+  "/performance": ALL_ROLES,
+  "/kra": kraNavItem.roles,
+  "/assets": ALL_ROLES,
+  "/documents": ALL_ROLES,
+  "/helpdesk": ALL_ROLES,
+  "/reports": STAFF_ROLES,
+  "/roles": ["admin"],
   "/audit": ["admin", "hr"],
-  "/settings": ["admin", "hr", "manager"],
+  "/settings": STAFF_ROLES,
+  "/complete-profile": onboardingRouteRoles["/complete-profile"] ?? ALL_ROLES,
+  "/profile-status": onboardingRouteRoles["/profile-status"] ?? ALL_ROLES,
 };
 
 export function rolesForPath(pathname: string): Role[] | null {
@@ -273,6 +434,7 @@ export const authService = {
     try {
       writeSession(await sessionForUser(supabase, data.user));
     } catch (sessionError) {
+      consumeEmploymentBlockNotice();
       await supabase.auth.signOut();
       return {
         error: {
@@ -287,40 +449,13 @@ export const authService = {
     return {};
   },
   async signUp(
-    input: SignUpInput,
+    _input: SignUpInput,
   ): Promise<{ error?: AuthError; needsEmailConfirmation?: boolean }> {
-    if (!isSupabaseConfigured || !supabase)
-      return {
-        error: {
-          message: "Supabase Auth is not configured. Add the required Vite environment variables.",
-        },
-      };
-    const cleanEmail = sanitizeEmail(input.email);
-    if (!isValidEmail(cleanEmail)) return { error: { message: "Enter a valid email address." } };
-    // No role/employee fields are set here on purpose: public sign-up always
-    // becomes an EMPLOYEE, and the employee record is created server-side by
-    // the on_auth_user_created trigger (handle_new_user), which is the only
-    // thing with the privilege to also assign an organization -- the client
-    // has no business deciding either of those for itself.
-    const { data, error } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: input.password,
-      options: { data: { full_name: input.name.trim() } },
-    });
-    if (error) return { error: { message: mapAuthError(error) } };
-    if (data.session && data.user) {
-      try {
-        writeSession(await sessionForUser(supabase, data.user));
-      } catch (sessionError) {
-        writeSession(null);
-        return {
-          error: {
-            message: `Supabase user created, but the application profile could not be loaded: ${sessionError instanceof Error ? sessionError.message : "unknown profile error"}`,
-          },
-        };
-      }
-    }
-    return { needsEmailConfirmation: !data.session };
+    return {
+      error: {
+        message: "Public sign-up is closed. Accounts are created by an administrator.",
+      },
+    };
   },
   async resetPasswordForEmail(email: string): Promise<{ error?: AuthError; success?: boolean }> {
     if (!isSupabaseConfigured || !supabase)
@@ -335,10 +470,7 @@ export const authService = {
     const cleanEmail = sanitizeEmail(email);
     if (!cleanEmail) return { error: { message: "Enter your email address." } };
     if (!isValidEmail(cleanEmail)) return { error: { message: "Enter a valid email address." } };
-    // Uses the actual origin the app is currently running on (whatever port
-    // Vite picked), not a hardcoded host, so this works in dev and prod alike.
-    const redirectTo =
-      typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
+    const redirectTo = passwordRecoveryRedirect();
     const { error } = await supabase.auth.resetPasswordForEmail(
       cleanEmail,
       redirectTo ? { redirectTo } : undefined,
@@ -355,11 +487,46 @@ export const authService = {
     const { error } = await supabase.auth.updateUser({ password });
     return error ? { error: { message: error.message } } : { success: true };
   },
-  async signOut(): Promise<{ error?: AuthError }> {
+  async changePassword(
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<{ error?: AuthError; success?: boolean }> {
+    if (!isSupabaseConfigured || !supabase)
+      return {
+        error: {
+          message: "Supabase Auth is not configured. Add the required Vite environment variables.",
+        },
+      };
+    if (!currentPassword) return { error: { message: "Enter your current password." } };
+    if (!isStrongPassword(newPassword)) {
+      return { error: { message: "Password does not meet the requirements." } };
+    }
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const email = userData.user?.email;
+    if (userError || !email) {
+      return { error: { message: "Sign in again before changing your password." } };
+    }
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email,
+      password: currentPassword,
+    });
+    if (verifyError) {
+      const message = /invalid login credentials/i.test(verifyError.message)
+        ? "Current password is incorrect."
+        : mapAuthError(verifyError);
+      return { error: { message } };
+    }
+    return this.updatePassword(newPassword);
+  },
+  async signOut(options?: {
+    scope?: "global" | "local" | "others";
+  }): Promise<{ error?: AuthError }> {
     if (signOutPromise) return signOutPromise;
+    const scope = options?.scope;
 
     signOutPromise = (async () => {
       signOutInProgress = true;
+      sessionEpoch += 1;
       try {
         // Logged while the JWT is still valid so current_org_id() can resolve
         // the actor. The RPC is best-effort internally and never blocks a
@@ -367,7 +534,7 @@ export const authService = {
         await logAudit("auth_sign_out", "profiles");
 
         if (supabase) {
-          const { error } = await supabase.auth.signOut();
+          const { error } = await supabase.auth.signOut(scope ? { scope } : undefined);
           if (error) return { error: { message: mapAuthError(error) } };
         }
 

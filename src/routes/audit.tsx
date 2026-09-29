@@ -8,6 +8,7 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { requireAuthForPath } from "@/lib/auth-guard";
+import { indianDateTime } from "@/lib/format";
 import { workplaceService } from "@/services/workplaceService";
 import type { AuditEntry } from "@/types";
 
@@ -32,7 +33,9 @@ function AuditPage() {
       {
         key: "timestamp",
         header: "When",
-        cell: (row) => <span className="whitespace-nowrap text-sm">{row.timestamp}</span>,
+        cell: (row) => (
+          <span className="whitespace-nowrap text-sm">{indianDateTime(row.timestamp)}</span>
+        ),
       },
       {
         key: "actor",
@@ -77,7 +80,11 @@ function AuditPage() {
       ) : audit.isError ? (
         <ErrorState onRetry={() => audit.refetch()} />
       ) : (audit.data ?? []).length === 0 ? (
-        <EmptyState title="No audit entries" description="Activity will be logged here once actions occur." icon={Activity} />
+        <EmptyState
+          title="No audit entries"
+          description="Activity will be logged here once actions occur."
+          icon={Activity}
+        />
       ) : (
         <DataTable columns={columns} data={audit.data ?? []} rowKey={(row) => row.id} />
       )}

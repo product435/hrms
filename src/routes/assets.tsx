@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LaptopMinimal, Plus, RotateCcw, Wrench } from "lucide-react";
+import { Check, LaptopMinimal, Plus, RotateCcw, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -16,12 +17,25 @@ import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { inr, shortDate } from "@/lib/format";
 import type { Asset, AssetCategory } from "@/types";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
-const REQUESTABLE_CATEGORIES: AssetCategory[] = ["Laptop", "Desktop", "Monitor", "Mobile", "ID Card", "Other"];
+const REQUESTABLE_CATEGORIES: AssetCategory[] = [
+  "Laptop",
+  "Desktop",
+  "Monitor",
+  "Mobile",
+  "ID Card",
+  "Other",
+];
 
 export const Route = createFileRoute("/assets")({
   beforeLoad: () => requireAuthForPath("/assets"),
@@ -51,17 +65,36 @@ function AssetsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [category, setCategory] = useState("all");
-  const [addOpen, setAddOpen] = useState(false); const [form, setForm] = useState({ code: "", name: "", category: "Laptop", condition: "new", status: "available", serialNumber: "", location: "", purchaseCost: "" });
+  const [addOpen, setAddOpen] = useState(false);
+  const [form, setForm] = useState({
+    code: "",
+    name: "",
+    category: "Laptop",
+    condition: "new",
+    status: "available",
+    serialNumber: "",
+    location: "",
+    purchaseCost: "",
+  });
 
   const assets = useQuery({
-    queryKey: ["assets", isSelfService ? (user.employeeId ?? user.id) : "all", search, status, category],
+    queryKey: [
+      "assets",
+      isSelfService ? (user.employeeId ?? user.id) : "all",
+      search,
+      status,
+      category,
+    ],
     queryFn: () =>
       isSelfService
         ? assetService.assignedTo(user.employeeId ?? user.id)
         : assetService.list({ search, status, category }),
     enabled: !isLoading,
   });
-  const history = useQuery({ queryKey: ["asset-history", isSelfService ? user.employeeId : "all"], queryFn: () => assetService.history(undefined, isSelfService ? user.employeeId : undefined) });
+  const history = useQuery({
+    queryKey: ["asset-history", isSelfService ? user.employeeId : "all"],
+    queryFn: () => assetService.history(undefined, isSelfService ? user.employeeId : undefined),
+  });
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [requestForm, setRequestForm] = useState<{ category: AssetCategory; details: string }>({
@@ -82,7 +115,9 @@ function AssetsPage() {
       void queryClient.invalidateQueries({ queryKey: ["asset-requests", "mine"] });
     },
     onError: (e) =>
-      toast.error("Could not submit request", { description: e instanceof Error ? e.message : "Try again." }),
+      toast.error("Could not submit request", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   // Admin/HR review queue -- RLS restricts this to whoever is actually
@@ -101,7 +136,9 @@ function AssetsPage() {
       void queryClient.invalidateQueries({ queryKey: ["asset-requests", "all"] });
     },
     onError: (e) =>
-      toast.error("Could not update request", { description: e instanceof Error ? e.message : "Try again." }),
+      toast.error("Could not update request", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const returnAsset = useMutation({
@@ -110,7 +147,10 @@ function AssetsPage() {
       toast.success("Asset marked as returned");
       queryClient.invalidateQueries({ queryKey: ["assets"] });
     },
-    onError: (error) => toast.error("Could not update the asset", { description: error instanceof Error ? error.message : "Try again." }),
+    onError: (error) =>
+      toast.error("Could not update the asset", {
+        description: error instanceof Error ? error.message : "Try again.",
+      }),
   });
 
   const repairAsset = useMutation({
@@ -119,9 +159,37 @@ function AssetsPage() {
       toast.success("Repair request logged");
       queryClient.invalidateQueries({ queryKey: ["assets"] });
     },
-    onError: (error) => toast.error("Could not log the repair request", { description: error instanceof Error ? error.message : "Try again." }),
+    onError: (error) =>
+      toast.error("Could not log the repair request", {
+        description: error instanceof Error ? error.message : "Try again.",
+      }),
   });
-  const addAsset = useMutation({ mutationFn: () => { if (!form.code.trim() || !form.name.trim()) throw new Error("Asset code and name are required."); return assetService.create({ ...form, purchaseCost: Number(form.purchaseCost) || 0 }); }, onSuccess: () => { toast.success("Asset added"); setAddOpen(false); setForm({ code: "", name: "", category: "Laptop", condition: "new", status: "available", serialNumber: "", location: "", purchaseCost: "" }); void queryClient.invalidateQueries({ queryKey: ["assets"] }); }, onError: (e) => toast.error("Could not add asset", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+  const addAsset = useMutation({
+    mutationFn: () => {
+      if (!form.code.trim() || !form.name.trim())
+        throw new Error("Asset code and name are required.");
+      return assetService.create({ ...form, purchaseCost: Number(form.purchaseCost) || 0 });
+    },
+    onSuccess: () => {
+      toast.success("Asset added");
+      setAddOpen(false);
+      setForm({
+        code: "",
+        name: "",
+        category: "Laptop",
+        condition: "new",
+        status: "available",
+        serialNumber: "",
+        location: "",
+        purchaseCost: "",
+      });
+      void queryClient.invalidateQueries({ queryKey: ["assets"] });
+    },
+    onError: (e) =>
+      toast.error("Could not add asset", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
 
   const columns = useMemo<Column<Asset>[]>(
     () => [
@@ -137,7 +205,11 @@ function AssetsPage() {
           </div>
         ),
       },
-      { key: "category", header: "Category", cell: (row) => <span className="text-sm">{row.category}</span> },
+      {
+        key: "category",
+        header: "Category",
+        cell: (row) => <span className="text-sm">{row.category}</span>,
+      },
       {
         key: "assignedTo",
         header: "Assigned to",
@@ -148,8 +220,17 @@ function AssetsPage() {
         header: "Issued",
         cell: (row) => <span className="text-sm">{shortDate(row.assignedOn)}</span>,
       },
-      { key: "condition", header: "Condition", cell: (row) => <StatusBadge status={row.condition} /> },
-      { key: "value", header: "Value", align: "right", cell: (row) => <span className="text-sm">{inr(row.value)}</span> },
+      {
+        key: "condition",
+        header: "Condition",
+        cell: (row) => <StatusBadge status={row.condition} />,
+      },
+      {
+        key: "value",
+        header: "Value",
+        align: "right",
+        cell: (row) => <span className="text-sm">{inr(row.value)}</span>,
+      },
       {
         key: "warranty",
         header: "Warranty till",
@@ -164,23 +245,23 @@ function AssetsPage() {
         cell: (row) => (
           <div className="flex justify-end gap-1.5">
             {canManage ? (
-              <Button
-                size="sm"
+              <IconAction
+                label="Return"
                 variant="outline"
                 disabled={returnAsset.isPending || row.status !== "assigned"}
                 onClick={() => returnAsset.mutate(row.tag)}
               >
-                <RotateCcw className="size-3.5" /> Return
-              </Button>
+                <RotateCcw />
+              </IconAction>
             ) : null}
-            <Button
-              size="sm"
+            <IconAction
+              label="Repair"
               variant="ghost"
               disabled={repairAsset.isPending}
               onClick={() => repairAsset.mutate(row.tag)}
             >
-              <Wrench className="size-3.5" /> Repair
-            </Button>
+              <Wrench />
+            </IconAction>
           </div>
         ),
       },
@@ -214,7 +295,13 @@ function AssetsPage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Total tracked" value={String(rows.length)} icon={LaptopMinimal} tone="primary" hint="in current view" />
+        <StatCard
+          label="Total tracked"
+          value={String(rows.length)}
+          icon={LaptopMinimal}
+          tone="primary"
+          hint="in current view"
+        />
         <StatCard
           label="Assigned"
           value={String(rows.filter((a) => a.status === "assigned").length)}
@@ -261,7 +348,7 @@ function AssetsPage() {
                   value: status,
                   onChange: setStatus,
                   options: [
-                  { value: "all", label: "All status" },
+                    { value: "all", label: "All status" },
                     { value: "assigned", label: "Assigned" },
                     { value: "available", label: "Available" },
                     { value: "in-repair", label: "In repair" },
@@ -290,7 +377,11 @@ function AssetsPage() {
         }
       />
 
-      <SectionCard title="Asset history" description="Assignment, return and repair events" bodyClassName="p-0">
+      <SectionCard
+        title="Asset history"
+        description="Assignment, return and repair events"
+        bodyClassName="p-0"
+      >
         <ul className="divide-y divide-border">
           {(history.data ?? []).slice(0, 8).map((event) => (
             <li key={event.id} className="flex items-center gap-3 px-5 py-3.5">
@@ -302,7 +393,9 @@ function AssetsPage() {
                   {event.actor} · {event.note}
                 </p>
               </div>
-              <span className="shrink-0 text-xs text-muted-foreground">{shortDate(event.date)}</span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {shortDate(event.date)}
+              </span>
             </li>
           ))}
           {history.data?.length === 0 ? (
@@ -312,17 +405,24 @@ function AssetsPage() {
       </SectionCard>
 
       {isSelfService ? (
-        <SectionCard title="My asset requests" description="Status of assets you've requested" bodyClassName="p-0">
+        <SectionCard
+          title="My asset requests"
+          description="Status of assets you've requested"
+          bodyClassName="p-0"
+        >
           <ul className="divide-y divide-border">
             {(myRequests.data ?? []).map((request) => (
               <li key={request.id} className="flex items-center gap-3 px-5 py-3.5">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{request.category}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    {request.details || "No details provided"} · requested {shortDate(request.requestedAt)}
+                    {request.details || "No details provided"} · requested{" "}
+                    {shortDate(request.requestedAt)}
                   </p>
                   {request.status === "rejected" && request.rejectionReason ? (
-                    <p className="truncate text-xs text-destructive">Reason: {request.rejectionReason}</p>
+                    <p className="truncate text-xs text-destructive">
+                      Reason: {request.rejectionReason}
+                    </p>
                   ) : null}
                 </div>
                 <StatusBadge status={request.status} />
@@ -338,36 +438,49 @@ function AssetsPage() {
       ) : null}
 
       {canManage ? (
-        <SectionCard title="Asset requests" description="Employee requests awaiting review" bodyClassName="p-0">
+        <SectionCard
+          title="Asset requests"
+          description="Employee requests awaiting review"
+          bodyClassName="p-0"
+        >
           <ul className="divide-y divide-border">
             {(assetRequests.data ?? [])
               .filter((r) => r.status === "pending")
               .map((request) => (
-                <li key={request.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+                <li
+                  key={request.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5"
+                >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold">{request.employeeName || "Unknown employee"}</p>
+                    <p className="truncate text-sm font-semibold">
+                      {request.employeeName || "Unknown employee"}
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {request.category} · {request.details || "No details provided"} · requested{" "}
                       {shortDate(request.requestedAt)}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      size="sm"
+                    <IconAction
+                      label="Approve"
                       variant="outline"
                       disabled={decideAssetRequest.isPending}
-                      onClick={() => decideAssetRequest.mutate({ id: request.id, decision: "approved" })}
+                      onClick={() =>
+                        decideAssetRequest.mutate({ id: request.id, decision: "approved" })
+                      }
                     >
-                      Approve
-                    </Button>
-                    <Button
-                      size="sm"
+                      <Check />
+                    </IconAction>
+                    <IconAction
+                      label="Reject"
                       variant="ghost"
                       disabled={decideAssetRequest.isPending}
-                      onClick={() => decideAssetRequest.mutate({ id: request.id, decision: "rejected" })}
+                      onClick={() =>
+                        decideAssetRequest.mutate({ id: request.id, decision: "rejected" })
+                      }
                     >
-                      Reject
-                    </Button>
+                      <X />
+                    </IconAction>
                   </div>
                 </li>
               ))}
@@ -380,7 +493,56 @@ function AssetsPage() {
         </SectionCard>
       ) : null}
 
-      <Dialog open={addOpen} onOpenChange={setAddOpen}><DialogContent><DialogHeader><DialogTitle>Add asset</DialogTitle></DialogHeader><div className="grid gap-3 sm:grid-cols-2">{([['code','Asset code'],['name','Name'],['serialNumber','Serial number'],['location','Location'],['purchaseCost','Purchase cost']] as const).map(([key,label]) => <div key={key}><Label>{label}</Label><Input type={key === 'purchaseCost' ? 'number' : 'text'} value={form[key]} onChange={(e) => setForm({ ...form, [key]: e.target.value })} /></div>)}<div><Label>Category</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>Laptop</option><option>Desktop</option><option>Monitor</option><option>Mobile</option><option>ID Card</option><option>Other</option></select></div></div><DialogFooter><Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button><Button onClick={() => addAsset.mutate()} disabled={addAsset.isPending}>{addAsset.isPending ? "Saving…" : "Add asset"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add asset</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {(
+              [
+                ["code", "Asset code"],
+                ["name", "Name"],
+                ["serialNumber", "Serial number"],
+                ["location", "Location"],
+                ["purchaseCost", "Purchase cost"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <Label>{label}</Label>
+                <Input
+                  type={key === "purchaseCost" ? "number" : "text"}
+                  value={form[key]}
+                  onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+                />
+              </div>
+            ))}
+            <div>
+              <Label>Category</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+              >
+                <option>Laptop</option>
+                <option>Desktop</option>
+                <option>Monitor</option>
+                <option>Mobile</option>
+                <option>ID Card</option>
+                <option>Other</option>
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => addAsset.mutate()} disabled={addAsset.isPending}>
+              {addAsset.isPending ? "Saving…" : "Add asset"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
         <DialogContent>
@@ -393,7 +555,9 @@ function AssetsPage() {
               <select
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={requestForm.category}
-                onChange={(e) => setRequestForm({ ...requestForm, category: e.target.value as AssetCategory })}
+                onChange={(e) =>
+                  setRequestForm({ ...requestForm, category: e.target.value as AssetCategory })
+                }
               >
                 {REQUESTABLE_CATEGORIES.map((c) => (
                   <option key={c} value={c}>

@@ -51,10 +51,18 @@ export async function currentOrganizationId(): Promise<string | null> {
     .maybeSingle();
   const employeeId = (profile.data as { employee_id?: string | null } | null)?.employee_id;
   if (employeeId) {
-    const linked = await supabase.from("employees").select("organization_id").eq("id", employeeId).maybeSingle();
+    const linked = await supabase
+      .from("employees")
+      .select("organization_id")
+      .eq("id", employeeId)
+      .maybeSingle();
     if (!linked.error && linked.data?.organization_id) return linked.data.organization_id;
   }
-  const linked = await supabase.from("employees").select("organization_id").eq("profile_id", userId).maybeSingle();
+  const linked = await supabase
+    .from("employees")
+    .select("organization_id")
+    .eq("profile_id", userId)
+    .maybeSingle();
   if (!linked.error && linked.data?.organization_id) return linked.data.organization_id;
   return null;
 }
@@ -85,16 +93,16 @@ export async function requireOrganizationId(): Promise<string> {
 export async function requireEmployeeId(fallbackId?: string): Promise<string> {
   const employeeId = await currentEmployeeId(fallbackId);
   if (!employeeId) {
-    throw new Error("Your account is not linked to an employee record yet. Contact an administrator.");
+    throw new Error(
+      "Your account is not linked to an employee record yet. Contact an administrator.",
+    );
   }
   return employeeId;
 }
 
 export function ensureSupabase() {
   if (!isSupabaseConfigured || !supabase) {
-    throw new Error(
-      "Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.",
-    );
+    throw new Error("Supabase is not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY.");
   }
   return supabase;
 }

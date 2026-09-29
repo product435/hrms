@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Toaster } from "@/components/ui/sonner";
+import { IdleSessionGuard } from "@/components/auth/IdleSessionGuard";
 import { SessionProvider } from "@/hooks/useSession";
 import { ThemeProvider } from "@/hooks/useTheme";
 
@@ -142,6 +143,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <SessionProvider>
+          <IdleSessionGuard />
           {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
           <Outlet />
           <Toaster />

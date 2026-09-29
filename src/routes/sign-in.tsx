@@ -7,15 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { redirectIfAuthenticated } from "@/lib/auth-guard";
-import { authService } from "@/services/authService";
+import { IDLE_SESSION_MESSAGE } from "@/components/auth/IdleSessionGuard";
+import { authService, EMPLOYMENT_BLOCKED_MESSAGE } from "@/services/authService";
 
 type SignInSearch = {
   redirect?: string;
+  blocked?: "employment";
+  expired?: "idle";
 };
 
 export const Route = createFileRoute("/sign-in")({
   validateSearch: (search: Record<string, unknown>): SignInSearch => ({
     ...(typeof search["redirect"] === "string" ? { redirect: search["redirect"] } : {}),
+    ...(search["blocked"] === "employment" ? { blocked: "employment" } : {}),
+    ...(search["expired"] === "idle" ? { expired: "idle" as const } : {}),
   }),
   beforeLoad: () => redirectIfAuthenticated(),
   head: () => ({
@@ -27,7 +32,9 @@ export const Route = createFileRoute("/sign-in")({
 function SignInPage() {
   const navigate = useNavigate();
   const search = Route.useSearch();
-  const redirect = search["redirect"];
+  const redirect = search.redirect;
+  const employmentBlocked = search.blocked === "employment";
+  const idleExpired = search.expired === "idle";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -57,16 +64,24 @@ function SignInPage() {
     <AuthLayout
       title="Sign in"
       subtitle="Access your JeeVijay HRMS workspace with your organisation account."
-      footer={
-        <>
-          Don&apos;t have an account?{" "}
-          <Link to="/sign-up" className="font-medium text-primary hover:underline">
-            Create account
-          </Link>
-        </>
-      }
     >
       <form className="space-y-4" onSubmit={handleSubmit}>
+        {employmentBlocked ? (
+          <p
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          >
+            {EMPLOYMENT_BLOCKED_MESSAGE}
+          </p>
+        ) : null}
+        {idleExpired ? (
+          <p
+            role="status"
+            className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-foreground"
+          >
+            {IDLE_SESSION_MESSAGE}
+          </p>
+        ) : null}
         <div className="space-y-2">
           <Label htmlFor="email">Work email</Label>
           <Input

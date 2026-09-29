@@ -16,10 +16,15 @@ import {
   Megaphone,
   Receipt,
   Settings,
+  ShieldCheck,
   Target,
   UserPlus,
   Users,
 } from "lucide-react";
+import { ATTENDANCE_ROUTE_ROLES } from "@/lib/nav-fragments/attendance";
+import { kraEmployeeLabelOverrides, kraNavItem } from "@/lib/nav-fragments/kra";
+import { workNavItem } from "@/lib/nav-fragments/work";
+import { ALL_ROLES, STAFF_ROLES } from "@/lib/roles";
 import type { Role } from "@/types";
 
 export interface NavItem {
@@ -35,7 +40,7 @@ export interface NavSection {
   items: NavItem[];
 }
 
-const ALL: Role[] = ["admin", "hr", "manager", "employee"];
+const ALL: Role[] = ALL_ROLES;
 
 export const navSections: NavSection[] = [
   {
@@ -53,13 +58,13 @@ export const navSections: NavSection[] = [
         label: "Employees",
         to: "/employees",
         icon: Users,
-        roles: ["admin", "hr", "manager"],
+        roles: STAFF_ROLES,
       },
       {
         label: "Departments",
         to: "/departments",
         icon: Building2,
-        roles: ["admin"],
+        roles: ["admin", "dept_head"],
       },
       {
         label: "Designations",
@@ -74,15 +79,26 @@ export const navSections: NavSection[] = [
   {
     title: "Time & Attendance",
     items: [
-      { label: "Attendance", to: "/attendance", icon: CalendarCheck, roles: ALL },
-      { label: "Shifts", to: "/shifts", icon: CalendarClock, roles: ["admin", "hr", "manager"] },
+      {
+        label: "Attendance",
+        to: "/attendance",
+        icon: CalendarCheck,
+        roles: ATTENDANCE_ROUTE_ROLES,
+      },
+      workNavItem,
+      { label: "Shifts", to: "/shifts", icon: CalendarClock, roles: STAFF_ROLES },
       { label: "Leave", to: "/leave", icon: ClipboardList, roles: ALL },
     ],
   },
   {
     title: "Compensation",
     items: [
-      { label: "Payroll", to: "/payroll", icon: BadgeIndianRupee, roles: ["admin", "hr", "employee"] },
+      {
+        label: "Payroll",
+        to: "/payroll",
+        icon: BadgeIndianRupee,
+        roles: ["admin", "hr", "employee"],
+      },
       { label: "Expenses", to: "/expenses", icon: Receipt, roles: ALL },
     ],
   },
@@ -90,23 +106,25 @@ export const navSections: NavSection[] = [
     title: "Growth",
     items: [
       { label: "Goals", to: "/goals", icon: Target, roles: ALL },
-      { label: "Performance", to: "/performance", icon: ChartBar, roles: ["admin", "hr", "manager", "employee"] },
+      { label: "Performance", to: "/performance", icon: ChartBar, roles: ALL },
+      kraNavItem,
     ],
   },
   {
     title: "Workplace",
     items: [
       { label: "Assets", to: "/assets", icon: LaptopMinimal, roles: ALL },
-      { label: "Documents", to: "/documents", icon: FileText, roles: ["admin", "hr", "manager", "employee"] },
+      { label: "Documents", to: "/documents", icon: FileText, roles: ALL },
       { label: "HR Helpdesk", to: "/helpdesk", icon: LifeBuoy, roles: ALL },
     ],
   },
   {
     title: "Administration",
     items: [
-      { label: "Reports & Analytics", to: "/reports", icon: ChartBar, roles: ["admin", "hr"] },
+      { label: "Role management", to: "/roles", icon: ShieldCheck, roles: ["admin"] },
+      { label: "Reports & Analytics", to: "/reports", icon: ChartBar, roles: STAFF_ROLES },
       { label: "Activity History", to: "/audit", icon: Activity, roles: ["admin", "hr"] },
-      { label: "Settings", to: "/settings", icon: Settings, roles: ["admin", "hr", "manager"] },
+      { label: "Settings", to: "/settings", icon: Settings, roles: STAFF_ROLES },
     ],
   },
 ];
@@ -131,10 +149,17 @@ export const employeeLabelOverrides: Record<string, string> = {
   "/performance": "My Performance",
   "/expenses": "My Expenses",
   "/helpdesk": "My Requests",
+  ...kraEmployeeLabelOverrides,
 };
 
-export const managerLabelOverrides: Record<string, string> = {
+export const leadLabelOverrides: Record<string, string> = {
   "/employees": "My Team",
   "/leave": "Leave approvals",
   "/documents": "Team Documents",
+};
+
+export const deptHeadLabelOverrides: Record<string, string> = {
+  ...leadLabelOverrides,
+  "/employees": "My Department",
+  "/documents": "Department Documents",
 };

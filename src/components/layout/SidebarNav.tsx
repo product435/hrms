@@ -1,6 +1,11 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { UserCircle2 } from "lucide-react";
-import { employeeLabelOverrides, managerLabelOverrides, navForRole } from "@/lib/navigation";
+import {
+  deptHeadLabelOverrides,
+  employeeLabelOverrides,
+  leadLabelOverrides,
+  navForRole,
+} from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/hooks/useSession";
 import { Brand } from "./Brand";
@@ -13,8 +18,8 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-[4.5rem] shrink-0 items-center border-b border-sidebar-border px-5">
-        <Brand />
+      <div className="flex h-18 shrink-0 items-center border-b border-sidebar-border px-5">
+        <Brand onDark />
       </div>
 
       <nav className="scroll-slim flex-1 overflow-y-auto px-3 py-4">
@@ -48,9 +53,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                 const label =
                   role === "employee"
                     ? (employeeLabelOverrides[item.to] ?? item.label)
-                    : role === "manager"
-                      ? (managerLabelOverrides[item.to] ?? item.label)
-                      : item.label;
+                    : role === "dept_head"
+                      ? (deptHeadLabelOverrides[item.to] ?? item.label)
+                      : role === "team_lead"
+                        ? (leadLabelOverrides[item.to] ?? item.label)
+                        : item.label;
                 const isActive = item.to === "/" ? pathname === "/" : pathname.startsWith(item.to);
                 return (
                   <li key={item.to}>
@@ -71,7 +78,11 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                         )}
                       />
                       <span className="truncate">{label}</span>
-                      {isActive ? (
+                      {item.badge ? (
+                        <span className="ml-auto inline-flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-sidebar-primary px-1.5 text-[10px] font-semibold tabular-nums text-sidebar-primary-foreground">
+                          {item.badge}
+                        </span>
+                      ) : isActive ? (
                         <span className="ml-auto size-1.5 shrink-0 rounded-full bg-sidebar-primary" />
                       ) : null}
                     </Link>

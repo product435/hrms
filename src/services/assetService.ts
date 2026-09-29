@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import { assetEvents as fixtureEvents, assets as fixtureAssets } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Asset, AssetEvent, AssetRequest } from "@/types";

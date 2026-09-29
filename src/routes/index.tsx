@@ -5,14 +5,17 @@ import {
   BadgeIndianRupee,
   Briefcase,
   CalendarCheck,
+  Check,
   ClipboardList,
   LaptopMinimal,
   LifeBuoy,
   Target,
   TrendingDown,
   Users,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -31,9 +34,18 @@ import { workplaceService } from "@/services/workplaceService";
 import { attendanceService } from "@/services/attendanceService";
 import { assetService } from "@/services/assetService";
 import { passwordResetRequestService } from "@/services/passwordResetRequestService";
+import { usePermissions } from "@/hooks/usePermissions";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
-import { compactInr, dayMonth, indianTime, inr, initialsOf, percent, shortDate } from "@/lib/format";
+import {
+  compactInr,
+  dayMonth,
+  indianTime,
+  inr,
+  initialsOf,
+  percent,
+  shortDate,
+} from "@/lib/format";
 
 export const Route = createFileRoute("/")({
   beforeLoad: () => requireAuthForPath("/"),
@@ -84,19 +96,49 @@ function recentMonthOptions(count = 12): string[] {
 function monthOptionLabel(label: string): string {
   const year = Number(label.slice(0, 4));
   const month = Number(label.slice(5, 7));
-  return new Date(year, month - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  return new Date(year, month - 1, 1).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function OrgDashboard() {
-  const { user, role } = useSession();
+  const { user, role, isLead, isTeamLead } = usePermissions();
   const [headcountMonth, setHeadcountMonth] = useState("");
-  const summary = useQuery({ queryKey: ["summary"], queryFn: () => insightsService.companySummary() });
-  const trend = useQuery({ queryKey: ["attendance-trend"], queryFn: () => insightsService.attendanceTrend() });
+  const summary = useQuery({
+    queryKey: ["summary"],
+    queryFn: () => insightsService.companySummary(),
+  });
+  const trend = useQuery({
+    queryKey: ["attendance-trend"],
+    queryFn: () => insightsService.attendanceTrend(),
+  });
   const headcount = useQuery({
     queryKey: ["headcount-trend", headcountMonth],
     queryFn: () => insightsService.headcountTrend(headcountMonth || undefined),
   });
-  const distribution = useQuery({ queryKey: ["dept-distribution", role, user.employeeId], queryFn: () => insightsService.departmentDistribution(role === "manager" ? user.employeeId : undefined) });
+  const trailingHeadcount = useQuery({
+    queryKey: ["headcount-trend", ""],
+    queryFn: () => insightsService.headcountTrend(),
+    enabled: Boolean(headcountMonth),
+  });
+  const headcountSeries = (headcountMonth ? trailingHeadcount.data : headcount.data) ?? [];
+  const previousHeadcount =
+    headcountSeries.length >= 2 ? headcountSeries[headcountSeries.length - 2] : null;
+  const latestHeadcount =
+    headcountSeries.length >= 2 ? headcountSeries[headcountSeries.length - 1] : null;
+  const headcountDelta =
+    previousHeadcount && latestHeadcount && previousHeadcount.headcount > 0
+      ? {
+          value: `${latestHeadcount.headcount >= previousHeadcount.headcount ? "+" : ""}${(((latestHeadcount.headcount - previousHeadcount.headcount) / previousHeadcount.headcount) * 100).toFixed(1)}%`,
+          direction: (latestHeadcount.headcount < previousHeadcount.headcount ? "down" : "up") as
+            "up" | "down",
+        }
+      : null;
+  const distribution = useQuery({
+    queryKey: ["dept-distribution", role, user.employeeId],
+    queryFn: () => insightsService.departmentDistribution(isTeamLead ? user.employeeId : undefined),
+  });
   // RLS returns a manager's own pending request alongside their team's
   // (leave_requests_self_select OR leave_requests_manager_view_team), but a
   // manager can never decide on their own request -- only a direct
@@ -104,12 +146,20 @@ function OrgDashboard() {
   const pending = useQuery({
     queryKey: ["leave", "pending", role, user.id],
     queryFn: async () => {
-      const rows = role === "manager" ? await leaveService.pendingApprovals() : await leaveService.list({ status: "pending" });
-      return role === "manager" ? rows.filter((r) => r.employeeId !== (user.employeeId ?? user.id)) : rows;
+      const rows = isLead
+        ? await leaveService.pendingApprovals()
+        : await leaveService.list({ status: "pending" });
+      return isLead ? rows.filter((r) => r.employeeId !== (user.employeeId ?? user.id)) : rows;
     },
   });
-  const openings = useQuery({ queryKey: ["openings", "open"], queryFn: () => talentService.openings({ status: "open" }) });
-  const announcements = useQuery({ queryKey: ["announcements"], queryFn: () => workplaceService.announcements() });
+  const openings = useQuery({
+    queryKey: ["openings", "open"],
+    queryFn: () => talentService.openings({ status: "open" }),
+  });
+  const announcements = useQuery({
+    queryKey: ["announcements"],
+    queryFn: () => workplaceService.announcements(),
+  });
 
   const s = summary.data;
 
@@ -142,8 +192,7 @@ function OrgDashboard() {
             value={String(s.headcount)}
             icon={Users}
             tone="primary"
-            delta={{ value: "+2.1%", direction: "up" }}
-            hint="vs last month"
+            {...(headcountDelta ? { delta: headcountDelta, hint: "vs last month" } : {})}
           />
           <StatCard
             label="Present today"
@@ -179,7 +228,7 @@ function OrgDashboard() {
             </Button>
           }
         >
-          {trend.data ? <AttendanceAreaChart data={trend.data} /> : <div className="h-[260px]" />}
+          {trend.data ? <AttendanceAreaChart data={trend.data} /> : <div className="h-65" />}
         </SectionCard>
 
         <SectionCard title="Department mix" description="Headcount distribution">
@@ -188,7 +237,7 @@ function OrgDashboard() {
               data={distribution.data.map((d) => ({ name: d.name, value: d.value }))}
             />
           ) : (
-            <div className="h-[260px]" />
+            <div className="h-65" />
           )}
         </SectionCard>
       </div>
@@ -213,7 +262,7 @@ function OrgDashboard() {
             </select>
           }
         >
-          {headcount.data ? <HeadcountBarChart data={headcount.data} /> : <div className="h-[260px]" />}
+          {headcount.data ? <HeadcountBarChart data={headcount.data} /> : <div className="h-65" />}
         </SectionCard>
 
         <SectionCard
@@ -268,14 +317,18 @@ function OrgDashboard() {
               </p>
             </div>
           ))}
-          {role !== "manager" ? (
+          {!isLead ? (
             <Button asChild variant="outline" className="w-full">
               <Link to="/recruitment">Open recruitment</Link>
             </Button>
           ) : null}
         </SectionCard>
 
-        <SectionCard title="Workplace health" description="Assets and helpdesk load" bodyClassName="space-y-4 p-5">
+        <SectionCard
+          title="Workplace health"
+          description="Assets and helpdesk load"
+          bodyClassName="space-y-4 p-5"
+        >
           <HealthRow
             icon={LaptopMinimal}
             label="Assets assigned"
@@ -298,7 +351,9 @@ function OrgDashboard() {
             icon={TrendingDown}
             label="Attrition"
             value={s?.attritionRate != null ? `${s.attritionRate}%` : "N/A"}
-            note={s?.avgTenureYears != null ? `avg tenure ${s.avgTenureYears} yrs` : "avg tenure N/A"}
+            note={
+              s?.avgTenureYears != null ? `avg tenure ${s.avgTenureYears} yrs` : "avg tenure N/A"
+            }
           />
         </SectionCard>
 
@@ -340,13 +395,16 @@ function PasswordResetRequestsSection() {
   });
 
   const approve = useMutation({
-    mutationFn: (vars: { id: string; email: string }) => passwordResetRequestService.approve(vars.id, vars.email),
+    mutationFn: (vars: { id: string; email: string }) =>
+      passwordResetRequestService.approve(vars.id, vars.email),
     onSuccess: () => {
       toast.success("Reset approved", { description: "A secure reset email has been sent." });
       void queryClient.invalidateQueries({ queryKey: ["password-reset-requests"] });
     },
     onError: (e) =>
-      toast.error("Could not approve request", { description: e instanceof Error ? e.message : "Try again." }),
+      toast.error("Could not approve request", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const reject = useMutation({
@@ -356,7 +414,9 @@ function PasswordResetRequestsSection() {
       void queryClient.invalidateQueries({ queryKey: ["password-reset-requests"] });
     },
     onError: (e) =>
-      toast.error("Could not reject request", { description: e instanceof Error ? e.message : "Try again." }),
+      toast.error("Could not reject request", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const items = requests.data ?? [];
@@ -370,7 +430,10 @@ function PasswordResetRequestsSection() {
     >
       <ul className="divide-y divide-border">
         {items.map((item) => (
-          <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
+          <li
+            key={item.id}
+            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5"
+          >
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">{item.employeeName || item.email}</p>
               <p className="truncate text-xs text-muted-foreground">
@@ -379,22 +442,22 @@ function PasswordResetRequestsSection() {
             </div>
             <StatusBadge status={item.status} />
             <div className="flex shrink-0 items-center gap-2">
-              <Button
-                size="sm"
+              <IconAction
+                label="Approve"
                 variant="outline"
                 disabled={approve.isPending || reject.isPending}
                 onClick={() => approve.mutate({ id: item.id, email: item.email })}
               >
-                Approve
-              </Button>
-              <Button
-                size="sm"
+                <Check />
+              </IconAction>
+              <IconAction
+                label="Reject"
                 variant="ghost"
                 disabled={approve.isPending || reject.isPending}
                 onClick={() => reject.mutate(item.id)}
               >
-                Reject
-              </Button>
+                <X />
+              </IconAction>
             </div>
           </li>
         ))}
@@ -452,7 +515,10 @@ function EmployeeDashboard() {
   });
   const payslips = useQuery({
     queryKey: ["payslips", user.id],
-    queryFn: () => import("@/services/payrollService").then((m) => m.payrollService.payslips({ employeeId: user.employeeId ?? user.id })),
+    queryFn: () =>
+      import("@/services/payrollService").then((m) =>
+        m.payrollService.payslips({ employeeId: user.employeeId ?? user.id }),
+      ),
   });
 
   return (
@@ -487,10 +553,20 @@ function EmployeeDashboard() {
         />
         <StatCard
           label="Leave balance"
-          value={myBalance.data ? String(myBalance.data.reduce((sum, entry) => sum + entry.remaining, 0)) : "—"}
+          value={
+            myBalance.data
+              ? String(myBalance.data.reduce((sum, entry) => sum + entry.remaining, 0))
+              : "—"
+          }
           icon={ClipboardList}
           tone="info"
-          hint={myBalance.data?.length ? myBalance.data.map((entry) => `${entry.name.replace(/ Leave$/i, "")} ${entry.remaining}`).join(" · ") : "No leave types configured"}
+          hint={
+            myBalance.data?.length
+              ? myBalance.data
+                  .map((entry) => `${entry.name.replace(/ Leave$/i, "")} ${entry.remaining}`)
+                  .join(" · ")
+              : "No leave types configured"
+          }
         />
         <StatCard
           label="Last net pay"
@@ -509,7 +585,11 @@ function EmployeeDashboard() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="My goals" description="Current performance cycle" bodyClassName="space-y-4 p-5">
+        <SectionCard
+          title="My goals"
+          description="Current performance cycle"
+          bodyClassName="space-y-4 p-5"
+        >
           {(myGoals.data ?? []).map((goal) => (
             <div key={goal.id}>
               <div className="flex items-center justify-between gap-2">
@@ -549,7 +629,11 @@ function EmployeeDashboard() {
         </SectionCard>
       </div>
 
-      <SectionCard title="Assets assigned to me" description="Report an issue from the assets page" bodyClassName="p-0">
+      <SectionCard
+        title="Assets assigned to me"
+        description="Report an issue from the assets page"
+        bodyClassName="p-0"
+      >
         <ul className="divide-y divide-border">
           {(myAssets.data ?? []).map((asset) => (
             <li key={asset.id} className="flex items-center gap-3 px-5 py-3.5">

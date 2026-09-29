@@ -1,12 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-type Role = "Admin" | "HR" | "Manager" | "Employee";
+type Role = "Admin" | "HR" | "Team Lead" | "Employee";
 
 const credentials: Record<Role, [string, string]> = {
   Admin: ["E2E_ADMIN_EMAIL", "E2E_ADMIN_PASSWORD"],
   HR: ["E2E_HR_EMAIL", "E2E_HR_PASSWORD"],
-  Manager: ["E2E_MANAGER_EMAIL", "E2E_MANAGER_PASSWORD"],
+  // Former manager account. The product stores this role as team_lead.
+  "Team Lead": ["E2E_MANAGER_EMAIL", "E2E_MANAGER_PASSWORD"],
   Employee: ["E2E_EMPLOYEE_EMAIL", "E2E_EMPLOYEE_PASSWORD"],
 };
 
@@ -33,6 +34,11 @@ const allowed: Record<Role, string[]> = {
     "/reports",
     "/audit",
     "/settings",
+    "/roles",
+    "/work",
+    "/kra",
+    "/complete-profile",
+    "/profile-status",
   ],
   HR: [
     "/",
@@ -56,8 +62,12 @@ const allowed: Record<Role, string[]> = {
     "/reports",
     "/audit",
     "/settings",
+    "/work",
+    "/kra",
+    "/complete-profile",
+    "/profile-status",
   ],
-  Manager: [
+  "Team Lead": [
     "/",
     "/announcements",
     "/notifications",
@@ -75,6 +85,10 @@ const allowed: Record<Role, string[]> = {
     "/helpdesk",
     "/reports",
     "/settings",
+    "/work",
+    "/kra",
+    "/complete-profile",
+    "/profile-status",
   ],
   Employee: [
     "/",
@@ -89,13 +103,17 @@ const allowed: Record<Role, string[]> = {
     "/assets",
     "/documents",
     "/helpdesk",
+    "/work",
+    "/kra",
+    "/complete-profile",
+    "/profile-status",
   ],
 };
 
 const forbidden: Record<Role, string[]> = {
   Admin: [],
-  HR: [],
-  Manager: ["/onboarding", "/recruitment", "/payroll", "/audit"],
+  HR: ["/roles"],
+  "Team Lead": ["/onboarding", "/recruitment", "/payroll", "/audit", "/roles"],
   Employee: [
     "/employees",
     "/departments",
@@ -106,6 +124,7 @@ const forbidden: Record<Role, string[]> = {
     "/reports",
     "/audit",
     "/settings",
+    "/roles",
   ],
 };
 

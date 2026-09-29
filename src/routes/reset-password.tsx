@@ -6,7 +6,11 @@ import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authService } from "@/services/authService";
+import {
+  authService,
+  hasPasswordRecoveryEvent,
+  openedWithRecoveryCredentials,
+} from "@/services/authService";
 import { passwordResetRequestService } from "@/services/passwordResetRequestService";
 import { supabase } from "@/lib/supabase";
 import { isStrongPassword, passwordChecks } from "@/lib/password";
@@ -35,30 +39,74 @@ function ResetPasswordPage() {
   // no link at all -- there's no session to update a password against, so
   // that's surfaced clearly instead of letting them fill out a form that can
   // only fail at the end.
-  const [sessionStatus, setSessionStatus] = useState<"checking" | "valid" | "invalid">("checking");
+  const [sessionStatus, setSessionStatus] = useState<
+    "checking" | "valid" | "invalid" | "redirecting"
+  >("checking");
 
   useEffect(() => {
     if (!supabase) {
       setSessionStatus("invalid");
       return;
     }
+    const client = supabase;
     let active = true;
-    const { data: subscription } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!active) return;
-      if (event === "PASSWORD_RECOVERY" || session) setSessionStatus("valid");
+    let accepted = false;
+    let left = false;
+
+    const accept = () => {
+      if (!active || left) return;
+      accepted = true;
+      setSessionStatus("valid");
+    };
+
+    const redirectSignedInUser = () => {
+      if (!active || accepted || left || hasPasswordRecoveryEvent()) return;
+      left = true;
+      setSessionStatus("redirecting");
+      void navigate({ to: "/", replace: true });
+    };
+
+    if (hasPasswordRecoveryEvent()) accept();
+
+    const { data: subscription } = client.auth.onAuthStateChange((event) => {
+      if (!active || accepted || left) return;
+      if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && hasPasswordRecoveryEvent())) {
+        accept();
+      }
     });
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active && data.session) setSessionStatus("valid");
+
+    void client.auth.getSession().then(({ data }) => {
+      if (!active || accepted || left) return;
+      if (hasPasswordRecoveryEvent()) {
+        accept();
+        return;
+      }
+      if (data.session && !openedWithRecoveryCredentials()) redirectSignedInUser();
     });
+
     const timeout = setTimeout(() => {
-      if (active) setSessionStatus((current) => (current === "checking" ? "invalid" : current));
+      if (!active || accepted || left) return;
+      if (hasPasswordRecoveryEvent()) {
+        accept();
+        return;
+      }
+      void client.auth.getSession().then(({ data }) => {
+        if (!active || accepted || left) return;
+        if (hasPasswordRecoveryEvent()) {
+          accept();
+          return;
+        }
+        if (data.session) redirectSignedInUser();
+        else setSessionStatus("invalid");
+      });
     }, 4000);
+
     return () => {
       active = false;
       subscription.subscription.unsubscribe();
       clearTimeout(timeout);
     };
-  }, []);
+  }, [navigate]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -102,9 +150,16 @@ function ResetPasswordPage() {
     navigate({ to: "/sign-in" });
   }
 
-  if (sessionStatus === "checking") {
+  if (sessionStatus === "checking" || sessionStatus === "redirecting") {
     return (
-      <AuthLayout title="Reset password" subtitle="Verifying your reset link…">
+      <AuthLayout
+        title="Reset password"
+        subtitle={
+          sessionStatus === "redirecting"
+            ? "Taking you to your workspace…"
+            : "Verifying your reset link…"
+        }
+      >
         <div className="flex justify-center py-6">
           <Loader2 className="size-6 animate-spin text-muted-foreground" />
         </div>

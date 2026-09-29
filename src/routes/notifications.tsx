@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell } from "lucide-react";
+import { Bell, Check } from "lucide-react";
 import { toast } from "sonner";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
@@ -9,6 +10,8 @@ import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/State
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { requireAuthForPath } from "@/lib/auth-guard";
+import { indianDateTime } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import { workplaceService } from "@/services/workplaceService";
 import type { NotificationItem } from "@/types";
 
@@ -23,24 +26,30 @@ export const Route = createFileRoute("/notifications")({
 function NotificationsPage() {
   const queryClient = useQueryClient();
   const notifications = useQuery({
-    queryKey: ["notifications"],
+    queryKey: queryKeys.notifications.all,
     queryFn: () => workplaceService.notifications(),
   });
 
   const unread = (notifications.data ?? []).filter((item) => !item.read).length;
 
   const markRead = useMutation({
-    mutationFn: (id: string) => workplaceService.markNotificationRead(id),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["notifications"] }),
-    onError: (e) => toast.error("Could not mark as read", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+    mutationFn: (id: string) => workplaceService.markRead(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all }),
+    onError: (e) =>
+      toast.error("Could not mark as read", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
   });
   const markAllRead = useMutation({
-    mutationFn: () => workplaceService.markAllNotificationsRead(),
+    mutationFn: () => workplaceService.markAllRead(),
     onSuccess: () => {
       toast.success("All caught up");
-      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
     },
-    onError: (e) => toast.error("Could not mark all as read", { description: e instanceof Error ? e.message : "Supabase request failed." }),
+    onError: (e) =>
+      toast.error("Could not mark all as read", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
   });
 
   return (
@@ -53,7 +62,12 @@ function NotificationsPage() {
           <div className="flex items-center gap-2">
             <StatusBadge status={`${unread} unread`} tone={unread > 0 ? "info" : "neutral"} />
             {unread > 0 ? (
-              <Button variant="outline" size="sm" onClick={() => markAllRead.mutate()} disabled={markAllRead.isPending}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => markAllRead.mutate()}
+                disabled={markAllRead.isPending}
+              >
                 Mark all as read
               </Button>
             ) : null}
@@ -89,10 +103,30 @@ function NotificationsPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-semibold">{item.title}</p>
                     <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
-                    <p className="mt-2 text-xs text-muted-foreground/80">{item.createdAt}</p>
+                    <p className="mt-2 text-xs text-muted-foreground/80">
+                      {indianDateTime(item.createdAt)}
+                    </p>
                     <ComplaintNotificationLink item={item} />
                   </div>
-                  <StatusBadge status={item.read ? "Read" : "New"} tone={item.read ? "neutral" : "info"} />
+                  <div className="flex items-center gap-2">
+                    {!item.read ? (
+                      <IconAction
+                        label="Mark read"
+                        variant="ghost"
+                        disabled={markRead.isPending}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          markRead.mutate(item.id);
+                        }}
+                      >
+                        <Check />
+                      </IconAction>
+                    ) : null}
+                    <StatusBadge
+                      status={item.read ? "Read" : "New"}
+                      tone={item.read ? "neutral" : "info"}
+                    />
+                  </div>
                 </div>
               </li>
             ))}

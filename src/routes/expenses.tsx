@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Receipt } from "lucide-react";
+import { Check, Plus, Receipt, Wallet, X } from "lucide-react";
 import { toast } from "sonner";
+import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -11,7 +12,13 @@ import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,7 +28,14 @@ import { useSession } from "@/hooks/useSession";
 import { workplaceService } from "@/services/workplaceService";
 import type { ExpenseClaim } from "@/types";
 
-const EXPENSE_CATEGORIES: ExpenseClaim["category"][] = ["Travel", "Food", "Internet", "Equipment", "Client", "Other"];
+const EXPENSE_CATEGORIES: ExpenseClaim["category"][] = [
+  "Travel",
+  "Food",
+  "Internet",
+  "Equipment",
+  "Client",
+  "Other",
+];
 
 export const Route = createFileRoute("/expenses")({
   beforeLoad: () => requireAuthForPath("/expenses"),
@@ -56,14 +70,20 @@ function ExpensesPage() {
     .reduce((sum, row) => sum + row.amount, 0);
 
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ category: "Travel" as ExpenseClaim["category"], amount: "", date: "", note: "" });
+  const [form, setForm] = useState({
+    category: "Travel" as ExpenseClaim["category"],
+    amount: "",
+    date: "",
+    note: "",
+  });
   const create = useMutation({
     mutationFn: () => {
-      if (!form.amount || Number(form.amount) <= 0) throw new Error("Enter a valid amount.");
+      const amount = Number(form.amount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid amount.");
       if (!form.date) throw new Error("Select the expense date.");
       return workplaceService.createExpenseClaim({
         category: form.category,
-        amount: Number(form.amount),
+        amount,
         date: form.date,
         note: form.note,
       });
@@ -74,7 +94,10 @@ function ExpensesPage() {
       setForm({ category: "Travel", amount: "", date: "", note: "" });
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
-    onError: (e) => toast.error("Could not submit claim", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not submit claim", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const decide = useMutation({
@@ -84,7 +107,10 @@ function ExpensesPage() {
       toast.success(vars.decision === "approved" ? "Claim approved" : "Claim rejected");
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
-    onError: (e) => toast.error("Could not update claim", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not update claim", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
   const reimburse = useMutation({
     mutationFn: (id: string) => workplaceService.markExpenseReimbursed(id),
@@ -92,7 +118,10 @@ function ExpensesPage() {
       toast.success("Claim marked reimbursed");
       void queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
-    onError: (e) => toast.error("Could not mark reimbursed", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not mark reimbursed", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const columns = useMemo<Column<ExpenseClaim>[]>(
@@ -120,7 +149,9 @@ function ExpensesPage() {
       {
         key: "note",
         header: "Note",
-        cell: (row) => <span className="line-clamp-1 text-sm text-muted-foreground">{row.note}</span>,
+        cell: (row) => (
+          <span className="line-clamp-1 text-sm text-muted-foreground">{row.note}</span>
+        ),
       },
       {
         key: "status",
@@ -137,18 +168,33 @@ function ExpensesPage() {
               cell: (row: ExpenseClaim) =>
                 row.status === "pending" ? (
                   <div className="flex justify-end gap-1.5">
-                    <Button size="sm" variant="outline" disabled={decide.isPending} onClick={() => decide.mutate({ id: row.id, decision: "approved" })}>
-                      Approve
-                    </Button>
-                    <Button size="sm" variant="ghost" disabled={decide.isPending} onClick={() => decide.mutate({ id: row.id, decision: "rejected" })}>
-                      Reject
-                    </Button>
+                    <IconAction
+                      label="Approve"
+                      variant="outline"
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ id: row.id, decision: "approved" })}
+                    >
+                      <Check />
+                    </IconAction>
+                    <IconAction
+                      label="Reject"
+                      variant="ghost"
+                      disabled={decide.isPending}
+                      onClick={() => decide.mutate({ id: row.id, decision: "rejected" })}
+                    >
+                      <X />
+                    </IconAction>
                   </div>
                 ) : row.status === "approved" ? (
                   <div className="flex justify-end">
-                    <Button size="sm" variant="outline" disabled={reimburse.isPending} onClick={() => reimburse.mutate(row.id)}>
-                      Mark reimbursed
-                    </Button>
+                    <IconAction
+                      label="Reimburse"
+                      variant="outline"
+                      disabled={reimburse.isPending}
+                      onClick={() => reimburse.mutate(row.id)}
+                    >
+                      <Wallet />
+                    </IconAction>
                   </div>
                 ) : null,
             },
@@ -189,7 +235,7 @@ function ExpensesPage() {
         status={status}
         onStatusChange={setStatus}
         statusOptions={[
-                  { value: "all", label: "All status" },
+          { value: "all", label: "All status" },
           { value: "pending", label: "Pending" },
           { value: "approved", label: "Approved" },
           { value: "rejected", label: "Rejected" },
@@ -202,7 +248,11 @@ function ExpensesPage() {
       ) : expenses.isError ? (
         <ErrorState onRetry={() => expenses.refetch()} />
       ) : visible.length === 0 ? (
-        <EmptyState title="No expense claims" description="Submitted claims will appear in this table." icon={Receipt} />
+        <EmptyState
+          title="No expense claims"
+          description="Submitted claims will appear in this table."
+          icon={Receipt}
+        />
       ) : (
         <DataTable columns={columns} data={visible} rowKey={(row) => row.id} />
       )}
@@ -218,7 +268,9 @@ function ExpensesPage() {
               <select
                 className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                 value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value as ExpenseClaim["category"] })}
+                onChange={(e) =>
+                  setForm({ ...form, category: e.target.value as ExpenseClaim["category"] })
+                }
               >
                 {EXPENSE_CATEGORIES.map((c) => (
                   <option key={c} value={c}>
@@ -230,16 +282,29 @@ function ExpensesPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Amount</Label>
-                <Input type="number" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+                <Input
+                  type="number"
+                  min="0"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                />
               </div>
               <div>
                 <Label>Date</Label>
-                <Input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+                <Input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => setForm({ ...form, date: e.target.value })}
+                />
               </div>
             </div>
             <div>
               <Label>Note</Label>
-              <Textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="What was this for?" />
+              <Textarea
+                value={form.note}
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+                placeholder="What was this for?"
+              />
             </div>
           </div>
           <DialogFooter>

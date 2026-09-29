@@ -11,19 +11,38 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { talentService } from "@/services/talentService";
 import { employeeService } from "@/services/employeeService";
-import { useSession } from "@/hooks/useSession";
+import { kraService } from "@/services/kraService";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { PerformanceReview } from "@/types";
+import { currentKraPeriod, formatKraScore, type PerformanceIndexRow } from "@/types/kra";
 
 // Single source of truth for "not submitted" vs. a genuine 0 rating --
 // null/undefined render as "Pending", a real number (including 0) never does.
 const fmtScore = (v: number | null | undefined) => (v != null ? v.toFixed(1) : "Pending");
+
+function KraReference({ row, period }: { row?: PerformanceIndexRow | undefined; period: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      Manager reference · KRA index ({row?.period ?? period}):{" "}
+      <span className="font-medium text-foreground">{formatKraScore(row?.performanceIndex)}</span>
+      {row && row.performanceIndex != null ? ` · ${row.band}` : ""}
+      {row?.prorated ? " · pro-rated" : ""}
+    </p>
+  );
+}
 
 export const Route = createFileRoute("/performance")({
   beforeLoad: () => requireAuthForPath("/performance"),
@@ -34,13 +53,29 @@ export const Route = createFileRoute("/performance")({
 });
 
 function PerformancePage() {
-  const { role, user } = useSession();
+  const { role, user, isLead, isDeptHead } = usePermissions();
   const isAdmin = role === "admin" || role === "hr";
   const queryClient = useQueryClient();
   const reviews = useQuery({
     queryKey: ["performance-reviews", role, user.employeeId],
     queryFn: () => talentService.reviews(),
   });
+  const kraPeriod = currentKraPeriod();
+  const kraIndexes = useQuery({
+    queryKey: ["kra-performance-index", kraPeriod, role, user.employeeId],
+    queryFn: async () => {
+      try {
+        return await kraService.listIndexes(kraPeriod);
+      } catch {
+        return [];
+      }
+    },
+  });
+  const kraByEmployee = useMemo(() => {
+    const map = new Map<string, PerformanceIndexRow>();
+    (kraIndexes.data ?? []).forEach((row) => map.set(row.employeeId, row));
+    return map;
+  }, [kraIndexes.data]);
 
   // RLS already scopes reviews.data correctly per role (self_select for
   // employee, self_select + manager_view_team for manager, admin_hr_all for
@@ -48,10 +83,15 @@ function PerformancePage() {
   const data = reviews.data ?? [];
   const distinctCycles = new Set(data.map((r) => r.cycle).filter(Boolean));
   const activeCycles = new Set(
-    data.filter((r) => r.status !== "completed" && r.status !== "closed").map((r) => r.cycle).filter(Boolean),
+    data
+      .filter((r) => r.status !== "completed" && r.status !== "closed")
+      .map((r) => r.cycle)
+      .filter(Boolean),
   );
   const inProgress = data.filter((row) => row.status === "in-progress").length;
-  const completed = data.filter((row) => row.status === "closed" || row.status === "completed").length;
+  const completed = data.filter(
+    (row) => row.status === "closed" || row.status === "completed",
+  ).length;
 
   const [cycleOpen, setCycleOpen] = useState(false);
   const [cycleName, setCycleName] = useState("");
@@ -62,7 +102,8 @@ function PerformancePage() {
     enabled: cycleOpen,
   });
   const createCycle = useMutation({
-    mutationFn: () => talentService.createReviewCycle({ cycleName, employeeIds: [...selectedEmployees] }),
+    mutationFn: () =>
+      talentService.createReviewCycle({ cycleName, employeeIds: [...selectedEmployees] }),
     onSuccess: () => {
       toast.success("Review cycle created");
       setCycleOpen(false);
@@ -70,15 +111,24 @@ function PerformancePage() {
       setSelectedEmployees(new Set());
       void queryClient.invalidateQueries({ queryKey: ["performance-reviews"] });
     },
-    onError: (e) => toast.error("Could not create cycle", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not create cycle", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
-  const [scoreDialog, setScoreDialog] = useState<{ reviewId: string; mode: "self" | "manager" } | null>(null);
+  const [scoreDialog, setScoreDialog] = useState<{
+    reviewId: string;
+    mode: "self" | "manager";
+  } | null>(null);
   const [scoreValue, setScoreValue] = useState("");
   const [feedbackValue, setFeedbackValue] = useState("");
   const submitSelf = useMutation({
     mutationFn: () =>
-      talentService.submitSelfReview(scoreDialog!.reviewId, { selfRating: Number(scoreValue), feedback: feedbackValue }),
+      talentService.submitSelfReview(scoreDialog!.reviewId, {
+        selfRating: Number(scoreValue),
+        feedback: feedbackValue,
+      }),
     onSuccess: () => {
       toast.success("Self review submitted");
       setScoreDialog(null);
@@ -86,11 +136,17 @@ function PerformancePage() {
       setFeedbackValue("");
       void queryClient.invalidateQueries({ queryKey: ["performance-reviews"] });
     },
-    onError: (e) => toast.error("Could not submit self review", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not submit self review", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
   const submitManager = useMutation({
     mutationFn: () =>
-      talentService.submitManagerReview(scoreDialog!.reviewId, { managerRating: Number(scoreValue), feedback: feedbackValue }),
+      talentService.submitManagerReview(scoreDialog!.reviewId, {
+        managerRating: Number(scoreValue),
+        feedback: feedbackValue,
+      }),
     onSuccess: () => {
       toast.success("Manager review submitted");
       setScoreDialog(null);
@@ -98,7 +154,10 @@ function PerformancePage() {
       setFeedbackValue("");
       void queryClient.invalidateQueries({ queryKey: ["performance-reviews"] });
     },
-    onError: (e) => toast.error("Could not submit manager review", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not submit manager review", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const columns = useMemo<Column<PerformanceReview>[]>(
@@ -136,6 +195,10 @@ function PerformancePage() {
               <span>Self: {fmtScore(row.selfScore)}</span>
               <span>Manager: {fmtScore(row.managerScore)}</span>
             </div>
+            <KraReference
+              row={row.employeeId ? kraByEmployee.get(row.employeeId) : undefined}
+              period={kraPeriod}
+            />
           </div>
         ),
       },
@@ -145,8 +208,10 @@ function PerformancePage() {
         cell: (row) => <StatusBadge status={row.status} />,
       },
     ],
-    [],
+    [kraByEmployee, kraPeriod],
   );
+
+  const scoringReview = data.find((row) => row.id === scoreDialog?.reviewId);
 
   return (
     <AppLayout>
@@ -156,9 +221,11 @@ function PerformancePage() {
         description={
           isAdmin
             ? "Review cycles, calibration scores and submission status across teams."
-            : role === "manager"
-              ? "Score your direct reports and track review status for your team."
-              : "Your assigned review cycle, self-score and feedback."
+            : isDeptHead
+              ? "Score reviews across your department and track their status."
+              : isLead
+                ? "Score your direct reports and track review status for your team."
+                : "Your assigned review cycle, self-score and feedback."
         }
         actions={
           isAdmin ? (
@@ -170,7 +237,12 @@ function PerformancePage() {
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Active cycles" value={String(activeCycles.size)} icon={ChartBar} hint={`${distinctCycles.size} total`} />
+        <StatCard
+          label="Active cycles"
+          value={String(activeCycles.size)}
+          icon={ChartBar}
+          hint={`${distinctCycles.size} total`}
+        />
         <StatCard label="In progress" value={String(inProgress)} tone="info" />
         <StatCard label="Completed" value={String(completed)} tone="success" />
       </div>
@@ -193,13 +265,22 @@ function PerformancePage() {
         <DataTable columns={columns} data={data} rowKey={(row) => row.id} />
       ) : (
         <SectionCard
-          title={role === "manager" ? "My team's reviews" : "My review"}
-          description={role === "manager" ? "Enter a score for each direct report's review" : "Enter your self-assessment score"}
+          title={
+            isDeptHead ? "My department's reviews" : isLead ? "My team's reviews" : "My review"
+          }
+          description={
+            isDeptHead
+              ? "Enter a score for each review in your department"
+              : isLead
+                ? "Enter a score for each direct report's review"
+                : "Enter your self-assessment score"
+          }
           bodyClassName="p-0"
         >
           <ul className="divide-y divide-border">
             {data.map((row) => {
-              const isOwnRow = Boolean(row.employeeId) && row.employeeId === (user.employeeId ?? user.id);
+              const isOwnRow =
+                Boolean(row.employeeId) && row.employeeId === (user.employeeId ?? user.id);
               // A manager sees both their own row (self_select) and their
               // direct reports' rows (manager_view_team) in the same list --
               // only the report rows get a manager-score action; their own
@@ -207,16 +288,23 @@ function PerformancePage() {
               const mode: "self" | "manager" | null =
                 isOwnRow && row.selfScore == null
                   ? "self"
-                  : !isOwnRow && role === "manager" && row.managerScore == null
+                  : !isOwnRow && isLead && row.managerScore == null
                     ? "manager"
                     : null;
               const alreadyScored = isOwnRow ? row.selfScore != null : row.managerScore != null;
               return (
-                <li key={row.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+                <li
+                  key={row.id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-5 py-4"
+                >
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold">
                       {row.employeeName}
-                      {isOwnRow ? <span className="ml-2 text-xs font-normal text-muted-foreground">(you)</span> : null}
+                      {isOwnRow ? (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          (you)
+                        </span>
+                      ) : null}
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {row.cycle} · reviewer {row.reviewer || "—"}
@@ -224,22 +312,46 @@ function PerformancePage() {
                     <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs">
                       <span className="text-muted-foreground">
                         Self:{" "}
-                        <span className={row.selfScore != null ? "font-medium text-foreground" : "italic text-muted-foreground"}>
+                        <span
+                          className={
+                            row.selfScore != null
+                              ? "font-medium text-foreground"
+                              : "italic text-muted-foreground"
+                          }
+                        >
                           {fmtScore(row.selfScore)}
                         </span>
                       </span>
                       <span className="text-muted-foreground">
                         Manager:{" "}
-                        <span className={row.managerScore != null ? "font-medium text-foreground" : "italic text-muted-foreground"}>
+                        <span
+                          className={
+                            row.managerScore != null
+                              ? "font-medium text-foreground"
+                              : "italic text-muted-foreground"
+                          }
+                        >
                           {fmtScore(row.managerScore)}
                         </span>
                       </span>
                       <span className="text-muted-foreground">
                         Final:{" "}
-                        <span className={row.finalRating != null ? "font-semibold text-foreground" : "italic text-muted-foreground"}>
+                        <span
+                          className={
+                            row.finalRating != null
+                              ? "font-semibold text-foreground"
+                              : "italic text-muted-foreground"
+                          }
+                        >
                           {fmtScore(row.finalRating)}
                         </span>
                       </span>
+                    </div>
+                    <div className="mt-1">
+                      <KraReference
+                        row={row.employeeId ? kraByEmployee.get(row.employeeId) : undefined}
+                        period={kraPeriod}
+                      />
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -274,13 +386,20 @@ function PerformancePage() {
           <div className="grid gap-3">
             <div>
               <Label>Cycle name</Label>
-              <Input placeholder="e.g. Q3-2026" value={cycleName} onChange={(e) => setCycleName(e.target.value)} />
+              <Input
+                placeholder="e.g. Q3-2026"
+                value={cycleName}
+                onChange={(e) => setCycleName(e.target.value)}
+              />
             </div>
             <div>
               <Label>Employees</Label>
               <div className="mt-1 max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
                 {(employees.data ?? []).map((e) => (
-                  <label key={e.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                  <label
+                    key={e.id}
+                    className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
+                  >
                     <input
                       type="checkbox"
                       checked={selectedEmployees.has(e.id)}
@@ -295,7 +414,9 @@ function PerformancePage() {
                     <span className="text-xs text-muted-foreground">{e.department}</span>
                   </label>
                 ))}
-                {employees.isLoading ? <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p> : null}
+                {employees.isLoading ? (
+                  <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -313,12 +434,31 @@ function PerformancePage() {
       <Dialog open={scoreDialog !== null} onOpenChange={(v) => !v && setScoreDialog(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{scoreDialog?.mode === "manager" ? "Enter manager score" : "Submit self score"}</DialogTitle>
+            <DialogTitle>
+              {scoreDialog?.mode === "manager" ? "Enter manager score" : "Submit self score"}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
+            {scoreDialog?.mode === "manager" ? (
+              <KraReference
+                row={
+                  scoringReview?.employeeId
+                    ? kraByEmployee.get(scoringReview.employeeId)
+                    : undefined
+                }
+                period={kraPeriod}
+              />
+            ) : null}
             <div>
               <Label>Score (0–5)</Label>
-              <Input type="number" min="0" max="5" step="0.1" value={scoreValue} onChange={(e) => setScoreValue(e.target.value)} />
+              <Input
+                type="number"
+                min="0"
+                max="5"
+                step="0.1"
+                value={scoreValue}
+                onChange={(e) => setScoreValue(e.target.value)}
+              />
             </div>
             <div>
               <Label>Feedback</Label>
@@ -330,7 +470,9 @@ function PerformancePage() {
               Cancel
             </Button>
             <Button
-              onClick={() => (scoreDialog?.mode === "manager" ? submitManager.mutate() : submitSelf.mutate())}
+              onClick={() =>
+                scoreDialog?.mode === "manager" ? submitManager.mutate() : submitSelf.mutate()
+              }
               disabled={
                 !scoreValue ||
                 Number(scoreValue) < 0 ||

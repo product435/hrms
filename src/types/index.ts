@@ -1,4 +1,4 @@
-export type Role = "admin" | "hr" | "manager" | "employee";
+export type Role = "admin" | "hr" | "dept_head" | "team_lead" | "employee";
 
 export interface SessionUser {
   id: string;
@@ -12,7 +12,8 @@ export interface SessionUser {
   avatarUrl?: string;
 }
 
-export type EmploymentStatus = "active" | "probation" | "notice" | "resigned" | "on-leave";
+export type EmploymentStatus =
+  "active" | "probation" | "notice" | "resigned" | "on-leave" | "suspended" | "terminated";
 export type EmploymentType = "full-time" | "part-time" | "contract" | "intern";
 
 export interface Employee {
@@ -55,14 +56,7 @@ export interface Department {
 }
 
 export type AttendanceStatus =
-  | "present"
-  | "absent"
-  | "late"
-  | "half-day"
-  | "wfh"
-  | "leave"
-  | "holiday"
-  | "week-off";
+  "present" | "absent" | "late" | "half-day" | "wfh" | "leave" | "holiday" | "week-off";
 
 export interface AttendanceRecord {
   id: string;
@@ -144,14 +138,7 @@ export interface Payslip {
 }
 
 export type AssetCategory =
-  | "Laptop"
-  | "Desktop"
-  | "Monitor"
-  | "Mobile"
-  | "Keyboard"
-  | "Mouse"
-  | "ID Card"
-  | "Other";
+  "Laptop" | "Desktop" | "Monitor" | "Mobile" | "Keyboard" | "Mouse" | "ID Card" | "Other";
 
 export type AssetStatus = "assigned" | "available" | "in-repair" | "retired" | "lost";
 export type AssetCondition = "new" | "good" | "fair" | "damaged";
@@ -268,7 +255,7 @@ export interface DocumentItem {
   size: string;
   uploadedOn: string;
   expiresOn: string | null;
-  verified: boolean;
+  verified?: boolean;
   filePath?: string;
 }
 
@@ -294,14 +281,25 @@ export interface HelpdeskTicket {
   assignedTo?: string | null;
 }
 
+export type AnnouncementTargetScope = "organization" | "department" | "role";
+
 export interface Announcement {
   id: string;
   title: string;
   body: string;
-  audience: "All" | "Engineering" | "Sales" | "Managers";
+  audience: string;
   author: string;
   publishedOn: string;
   pinned: boolean;
+  priority: "normal" | "urgent";
+  isActive: boolean;
+  expired: boolean;
+  read: boolean;
+  expiresAt: string | null;
+  targetScope: AnnouncementTargetScope;
+  targetDepartmentId: string | null;
+  targetDepartmentName: string | null;
+  targetRole: Role | null;
 }
 
 export interface NotificationItem {

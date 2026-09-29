@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
+import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { settingsService } from "@/services/settingsService";
 
 export const Route = createFileRoute("/settings")({
@@ -85,7 +86,7 @@ function SettingsPage() {
         <TabsContent value="organisation">
           <SectionCard
             title="Company profile"
-                description="Branding and regional defaults shown across JeeVijay HRMS."
+            description="Branding and regional defaults shown across JeeVijay HRMS."
             bodyClassName="space-y-4 p-5"
           >
             <div className="grid gap-4 sm:grid-cols-2">
@@ -115,7 +116,7 @@ function SettingsPage() {
           </SectionCard>
         </TabsContent>
 
-        <TabsContent value="access">
+        <TabsContent value="access" className="space-y-4">
           <SectionCard
             title="Your access"
             description="Role assignment is managed by HR and synced from profiles when Supabase is connected."
@@ -138,6 +139,7 @@ function SettingsPage() {
               </div>
             </div>
           </SectionCard>
+          <ChangePasswordForm />
         </TabsContent>
 
         <TabsContent value="notifications">
@@ -146,23 +148,24 @@ function SettingsPage() {
             description="Configure which events generate inbox alerts and email digests."
             bodyClassName="space-y-4 p-5"
           >
-            {(
-              [
-                {
-                  key: "leaveApprovals" as const,
-                  icon: Bell,
-                  label: "Leave approvals",
-                  description: "Notify when requests need action",
-                },
-                {
-                  key: "payrollRuns" as const,
-                  icon: Building2,
-                  label: "Payroll runs",
-                  description: "Alerts when payroll is processed",
-                },
-              ]
-            ).map((item) => (
-              <div key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-border p-4">
+            {[
+              {
+                key: "leaveApprovals" as const,
+                icon: Bell,
+                label: "Leave approvals",
+                description: "Notify when requests need action",
+              },
+              {
+                key: "payrollRuns" as const,
+                icon: Building2,
+                label: "Payroll runs",
+                description: "Alerts when payroll is processed",
+              },
+            ].map((item) => (
+              <div
+                key={item.key}
+                className="flex items-center justify-between gap-4 rounded-xl border border-border p-4"
+              >
                 <div className="flex items-start gap-3">
                   <item.icon className="mt-0.5 size-4 text-primary" />
                   <div>

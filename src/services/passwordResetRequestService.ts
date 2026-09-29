@@ -1,6 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PasswordResetRequest } from "@/types";
+import { authService, passwordRecoveryRedirect } from "./authService";
 import { currentUserId } from "./api";
+
+function surfacedResetError(message: string): boolean {
+  return /rate limit|too many attempts|network error|failed to fetch|timeout/i.test(message);
+}
 
 function mapRequest(r: any): PasswordResetRequest {
   return {
@@ -17,16 +23,17 @@ function mapRequest(r: any): PasswordResetRequest {
 }
 
 export const passwordResetRequestService = {
-  // Called from the unauthenticated Forgot Password page. The email that
-  // resolves to the single Admin account never gets queued -- the caller
-  // falls back to Supabase's direct recovery email for that case, since the
-  // one Admin can't depend on another Admin to approve their own request.
-  async request(email: string): Promise<{ isAdminAccount: boolean }> {
+  // One response for every address. Auth recover runs first so an admin still
+  // receives a reset email; the RPC then queues non-admins and clears their
+  // fresh recovery token. Callers must not branch on the RPC payload.
+  async request(email: string): Promise<void> {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { data, error } = await supabase.rpc("request_password_reset", { p_email: email });
+    const emailResult = await authService.resetPasswordForEmail(email);
+    const { error } = await supabase.rpc("request_password_reset", { p_email: email });
     if (error) throw error;
-    const row = Array.isArray(data) ? data[0] : data;
-    return { isAdminAccount: Boolean(row?.is_admin_account) };
+    if (emailResult.error && surfacedResetError(emailResult.error.message)) {
+      throw new Error(emailResult.error.message);
+    }
   },
   // Admin-only (enforced by RLS): every pending request across the
   // organization -- there's a single Admin, so no org filter is needed here
@@ -45,7 +52,7 @@ export const passwordResetRequestService = {
   // Forgot Password flow uses) and records who approved it and when.
   async approve(id: string, email: string): Promise<void> {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const redirectTo = typeof window !== "undefined" ? `${window.location.origin}/reset-password` : undefined;
+    const redirectTo = passwordRecoveryRedirect();
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(
       email,
       redirectTo ? { redirectTo } : undefined,

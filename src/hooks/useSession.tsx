@@ -8,7 +8,9 @@ interface SessionContextValue {
   role: Role;
   isAuthenticated: boolean;
   isLoading: boolean;
-  signOut: () => Promise<{ error?: { message: string } }>;
+  signOut: (options?: {
+    scope?: "global" | "local" | "others";
+  }) => Promise<{ error?: { message: string } }>;
   can: (roles: Role[]) => boolean;
   refresh: () => void;
 }
@@ -70,8 +72,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       role: session?.user?.role ?? "employee",
       isAuthenticated: Boolean(session),
       isLoading,
-      signOut: async () => {
-        const result = await authService.signOut();
+      signOut: async (options) => {
+        const result = await authService.signOut(options);
         if (result.error) return result;
         await queryClient.cancelQueries();
         queryClient.clear();
@@ -87,13 +89,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook is consumed beside the provider
 export function useSession() {
   return useContext(SessionContext);
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- labels are shared with the session hook
 export const ROLE_LABELS: Record<Role, string> = {
-  admin: "Admin",
+  admin: "Super Admin",
   hr: "HR",
-  manager: "Manager",
+  dept_head: "Department Head",
+  team_lead: "Team Lead",
   employee: "Employee",
 };

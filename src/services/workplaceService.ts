@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import {
   announcements as fixtureAnnouncements,
   auditEntries as fixtureAudit,
@@ -6,16 +7,56 @@ import {
   notifications as fixtureNotifications,
   tickets as fixtureTickets,
 } from "@/lib/mock-data";
+import { ALL_ROLES } from "@/lib/roles";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type {
   Announcement,
+  AnnouncementTargetScope,
   AuditEntry,
   DocumentItem,
   ExpenseClaim,
   HelpdeskTicket,
   NotificationItem,
+  Role,
 } from "@/types";
-import { currentUserId, fromFixture, logAudit, matchesSearch, requireEmployeeId, requireOrganizationId, type QueryOptions } from "./api";
+import {
+  currentEmployeeId,
+  currentUserId,
+  fromFixture,
+  logAudit,
+  matchesSearch,
+  requireEmployeeId,
+  requireOrganizationId,
+  type QueryOptions,
+} from "./api";
+
+const DOCUMENT_MAX_BYTES = 10 * 1024 * 1024;
+
+const DOCUMENT_CONTENT_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+export function assertAllowedDocument(file: File): string {
+  const baseName = file.name.split(/[/\\]/).pop()?.trim() ?? "";
+  const extension = baseName.includes(".") ? (baseName.split(".").pop()?.toLowerCase() ?? "") : "";
+  const contentType = DOCUMENT_CONTENT_TYPES[extension];
+  if (!baseName || !contentType) {
+    throw new Error("Only PDF, PNG, JPEG, and WebP files can be uploaded.");
+  }
+  const reported = file.type.split(";")[0]?.trim().toLowerCase() ?? "";
+  const normalized = reported === "image/jpg" ? "image/jpeg" : reported;
+  if (normalized && normalized !== contentType) {
+    throw new Error("Only PDF, PNG, JPEG, and WebP files can be uploaded.");
+  }
+  if (file.size <= 0) throw new Error("The file is empty.");
+  if (file.size > DOCUMENT_MAX_BYTES) throw new Error("Files must be 10 MB or smaller.");
+  return contentType;
+}
+
 const mapDocument = (r: any): DocumentItem => ({
   id: r.id,
   name: r.title,
@@ -24,8 +65,6 @@ const mapDocument = (r: any): DocumentItem => ({
   size: `${Math.round(Number(r.file_size ?? 0) / 1024)} KB`,
   uploadedOn: r.uploaded_at,
   expiresOn: r.expiry_date,
-  // No verification/review flag exists on the documents table.
-  verified: false,
   // Storage object path (documents bucket), not a URL -- the bucket is
   // private, so View/Open exchanges this for a short-lived signed URL
   // on demand rather than storing/exposing a public link.
@@ -51,17 +90,119 @@ const mapTicket = (r: any): HelpdeskTicket => ({
   assignee: r.assignee?.full_name ?? "Unassigned",
   assignedTo: r.assigned_to ?? null,
 });
-const mapAnnouncement = (r: any): Announcement => ({
-  id: r.id,
-  title: r.title,
-  body: r.content,
-  // No audience-targeting column exists; announcements are organization-wide.
-  audience: "All",
-  author: r.author?.full_name ?? "",
-  publishedOn: r.published_at,
-  // No pin flag; "urgent" priority surfaces the same way pinned did.
-  pinned: r.priority === "urgent",
-});
+const ANNOUNCEMENT_ROLE_LABELS: Record<Role, string> = {
+  admin: "Admin",
+  hr: "HR",
+  dept_head: "Department head",
+  team_lead: "Team lead",
+  employee: "Employee",
+};
+
+export type AnnouncementDraft = {
+  title: string;
+  content: string;
+  priority: string;
+  targetScope: AnnouncementTargetScope;
+  targetDepartmentId?: string | null;
+  targetRole?: string | null;
+  expiresAt?: string | null;
+};
+
+function isAnnouncementRole(value: string | null | undefined): value is Role {
+  return Boolean(value && ALL_ROLES.includes(value as Role));
+}
+
+function announcementAudience(
+  scope: AnnouncementTargetScope,
+  departmentName: string | null,
+  role: Role | null,
+) {
+  if (scope === "department")
+    return departmentName ? `Department · ${departmentName}` : "Department";
+  if (scope === "role" && role) return `Role · ${ANNOUNCEMENT_ROLE_LABELS[role]}`;
+  return "Everyone";
+}
+
+function announcementClosed(isActive: boolean, expiresAt: string | null) {
+  if (!isActive) return true;
+  if (!expiresAt) return false;
+  const expiry = new Date(expiresAt).getTime();
+  return Number.isFinite(expiry) && expiry <= Date.now();
+}
+
+function announcementWriteRow(input: AnnouncementDraft) {
+  const title = input.title.trim();
+  const content = input.content.trim();
+  if (!title) throw new Error("Title is required.");
+  if (!content) throw new Error("Content is required.");
+  const priority =
+    input.priority === "urgent" ? "urgent" : input.priority === "normal" ? "normal" : null;
+  if (!priority) throw new Error("Priority must be normal or urgent.");
+
+  const targetScope = input.targetScope;
+  let targetDepartmentId: string | null = null;
+  let targetRole: Role | null = null;
+  if (targetScope === "department") {
+    targetDepartmentId = input.targetDepartmentId?.trim() || null;
+    if (!targetDepartmentId) throw new Error("Choose a department.");
+  } else if (targetScope === "role") {
+    if (!isAnnouncementRole(input.targetRole)) throw new Error("Choose a role.");
+    targetRole = input.targetRole;
+  } else if (targetScope !== "organization") {
+    throw new Error("Choose who should see this announcement.");
+  }
+
+  let expiresAt: string | null = null;
+  if (input.expiresAt) {
+    const expiry = new Date(input.expiresAt);
+    if (Number.isNaN(expiry.getTime())) throw new Error("Expiry must be a valid date and time.");
+    expiresAt = expiry.toISOString();
+  }
+
+  return {
+    title,
+    content,
+    priority,
+    target_scope: targetScope,
+    target_department_id: targetDepartmentId,
+    target_role: targetRole,
+    expires_at: expiresAt,
+  };
+}
+
+const mapAnnouncement = (
+  r: any,
+  readIds: Set<string>,
+  departmentNames: Map<string, string>,
+): Announcement => {
+  const targetScope: AnnouncementTargetScope =
+    r.target_scope === "department" || r.target_scope === "role" ? r.target_scope : "organization";
+  const targetRole = isAnnouncementRole(r.target_role) ? r.target_role : null;
+  const departmentName = r.target_department_id
+    ? (departmentNames.get(r.target_department_id) ?? null)
+    : null;
+  const expiresAt = r.expires_at ?? null;
+  const isActive = r.is_active !== false;
+  const priority = r.priority === "urgent" ? "urgent" : "normal";
+  return {
+    id: r.id,
+    title: r.title ?? "",
+    body: r.content ?? "",
+    audience: announcementAudience(targetScope, departmentName, targetRole),
+    author: r.author?.full_name ?? "",
+    publishedOn: r.published_at ?? "",
+    pinned: priority === "urgent",
+    priority,
+    isActive,
+    expired: Boolean(expiresAt && new Date(expiresAt).getTime() <= Date.now()),
+    read: readIds.has(r.id),
+    expiresAt,
+    targetScope,
+    targetDepartmentId: r.target_department_id ?? null,
+    targetDepartmentName: departmentName,
+    targetRole,
+  };
+};
 export const workplaceService = {
   async documents(options: QueryOptions & { category?: string } = {}): Promise<DocumentItem[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -85,10 +226,7 @@ export const workplaceService = {
       .filter((d) => matchesSearch([d.name, d.owner, d.category], options.search));
   },
   async documentsOf(employeeId: string): Promise<DocumentItem[]> {
-    if (!isSupabaseConfigured || !supabase)
-      return fromFixture(
-        fixtureDocuments,
-      );
+    if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureDocuments);
     const query = supabase
       .from("documents")
       .select("*, employees(first_name,last_name)")
@@ -111,23 +249,29 @@ export const workplaceService = {
   },
   async uploadDocument(file: File, employeeId: string, category = "Other") {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const path = `${employeeId}/${crypto.randomUUID()}-${file.name}`;
+    const contentType = assertAllowedDocument(file);
+    const baseName = file.name.split(/[/\\]/).pop()?.trim() || "document";
+    const path = `${employeeId}/${crypto.randomUUID()}-${baseName}`;
     const storage = supabase.storage.from("documents");
-    const upload = await storage.upload(path, file, { upsert: false });
+    const upload = await storage.upload(path, file, { upsert: false, contentType });
     if (upload.error) throw upload.error;
     try {
       const uploadedBy = await currentUserId();
-      const { data, error } = await supabase.from("documents").insert({
-        employee_id: employeeId,
-        title: file.name,
-        category,
-        file_size: file.size,
-        file_type: file.type || null,
-        file_url: path,
-        uploaded_by: uploadedBy,
-      }).select("id").single();
+      const { data, error } = await supabase
+        .from("documents")
+        .insert({
+          employee_id: employeeId,
+          title: baseName,
+          category,
+          file_size: file.size,
+          file_type: contentType,
+          file_url: path,
+          uploaded_by: uploadedBy,
+        })
+        .select("id")
+        .single();
       if (error) throw error;
-      void logAudit("document_upload", "documents", data.id, null, { title: file.name, category });
+      void logAudit("document_upload", "documents", data.id, null, { title: baseName, category });
       return data;
     } catch (error) {
       // Do not leave an orphaned object when the metadata insert is rejected.
@@ -156,7 +300,12 @@ export const workplaceService = {
       .map(mapExpense)
       .filter((e) => matchesSearch([e.employeeName, e.category, e.note], options.search));
   },
-  async createExpenseClaim(input: { category: string; amount: number; date: string; note?: string }) {
+  async createExpenseClaim(input: {
+    category: string;
+    amount: number;
+    date: string;
+    note?: string;
+  }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const employeeId = await requireEmployeeId();
     const { data, error } = await supabase
@@ -172,10 +321,17 @@ export const workplaceService = {
       .select("id")
       .single();
     if (error) throw error;
-    void logAudit("expense_claim_create", "expense_claims", data.id, null, { category: input.category, amount: input.amount });
+    void logAudit("expense_claim_create", "expense_claims", data.id, null, {
+      category: input.category,
+      amount: input.amount,
+    });
     return data;
   },
-  async decideExpenseClaim(id: string, decision: "approved" | "rejected", rejectionReason?: string) {
+  async decideExpenseClaim(
+    id: string,
+    decision: "approved" | "rejected",
+    rejectionReason?: string,
+  ) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const approverId = await currentUserId();
     const { error } = await supabase
@@ -197,10 +353,18 @@ export const workplaceService = {
   // is just the same shape as decideExpenseClaim for the one missing value.
   async markExpenseReimbursed(id: string) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from("expense_claims").update({ status: "reimbursed" }).eq("id", id);
+    const { error } = await supabase
+      .from("expense_claims")
+      .update({ status: "reimbursed" })
+      .eq("id", id);
     if (error) throw error;
   },
-  async createTicket(input: { subject: string; category: string; priority: string; description?: string }) {
+  async createTicket(input: {
+    subject: string;
+    category: string;
+    priority: string;
+    description?: string;
+  }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const employeeId = await requireEmployeeId();
     const { data, error } = await supabase
@@ -216,21 +380,32 @@ export const workplaceService = {
       .select("id")
       .single();
     if (error) throw error;
-    void logAudit("helpdesk_ticket_create", "helpdesk_tickets", data.id, null, { subject: input.subject, category: input.category });
+    void logAudit("helpdesk_ticket_create", "helpdesk_tickets", data.id, null, {
+      subject: input.subject,
+      category: input.category,
+    });
     return data;
   },
   async updateTicketStatus(id: string, status: string) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const { error } = await supabase
       .from("helpdesk_tickets")
-      .update({ status, ...(status === "resolved" || status === "closed" ? { resolved_at: new Date().toISOString() } : {}) })
+      .update({
+        status,
+        ...(status === "resolved" || status === "closed"
+          ? { resolved_at: new Date().toISOString() }
+          : {}),
+      })
       .eq("id", id);
     if (error) throw error;
     void logAudit("helpdesk_ticket_status_update", "helpdesk_tickets", id, null, { status });
   },
   async updateTicketAssignee(id: string, assignedTo: string | null) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from("helpdesk_tickets").update({ assigned_to: assignedTo }).eq("id", id);
+    const { error } = await supabase
+      .from("helpdesk_tickets")
+      .update({ assigned_to: assignedTo })
+      .eq("id", id);
     if (error) throw error;
   },
   // Assignee options for helpdesk tickets: assigned_to references profiles,
@@ -246,17 +421,24 @@ export const workplaceService = {
     if (error) throw error;
     return (data ?? []).map((p) => ({ id: p.id, name: (p.full_name ?? "").trim() || "Unnamed" }));
   },
-  async createAnnouncement(input: { title: string; content: string; priority: string }) {
+  async announcementDepartments(): Promise<{ id: string; name: string }[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase.from("departments").select("id, name").order("name");
+    if (error) throw error;
+    return (data ?? [])
+      .filter((row) => row.id && row.name)
+      .map((row) => ({ id: row.id, name: row.name ?? "Department" }));
+  },
+  async createAnnouncement(input: AnnouncementDraft) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const organizationId = await requireOrganizationId();
     const publishedBy = await currentUserId();
+    const row = announcementWriteRow(input);
     const { data, error } = await supabase
       .from("announcements")
       .insert({
         organization_id: organizationId,
-        title: input.title.trim(),
-        content: input.content.trim(),
-        priority: input.priority,
+        ...row,
         ...(publishedBy ? { published_by: publishedBy } : {}),
         published_at: new Date().toISOString(),
         is_active: true,
@@ -264,7 +446,77 @@ export const workplaceService = {
       .select("id")
       .single();
     if (error) throw error;
+    void logAudit("announcement_create", "announcements", data.id, null, {
+      target_scope: row.target_scope,
+      priority: row.priority,
+    });
     return data;
+  },
+  async updateAnnouncement(id: string, input: AnnouncementDraft) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const row = announcementWriteRow(input);
+    const { data, error } = await supabase
+      .from("announcements")
+      .update(row)
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("You cannot change this announcement.");
+    void logAudit("announcement_update", "announcements", id, null, {
+      target_scope: row.target_scope,
+      priority: row.priority,
+    });
+  },
+  async setAnnouncementActive(id: string, isActive: boolean) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase
+      .from("announcements")
+      .update({ is_active: isActive })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data)
+      throw new Error(
+        isActive
+          ? "You cannot publish this announcement."
+          : "You cannot unpublish this announcement.",
+      );
+    void logAudit(
+      isActive ? "announcement_publish" : "announcement_unpublish",
+      "announcements",
+      id,
+      null,
+      {
+        is_active: isActive,
+      },
+    );
+  },
+  async deleteAnnouncement(id: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase
+      .from("announcements")
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error("You cannot delete this announcement.");
+    void logAudit("announcement_delete", "announcements", id);
+  },
+  async markAnnouncementRead(id: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const userId = await currentUserId();
+    const employeeId = await currentEmployeeId();
+    if (!userId && !employeeId) throw new Error("Sign in again to mark this announcement as read.");
+    const { error } = await supabase.from("announcement_reads").insert({
+      announcement_id: id,
+      ...(userId ? { user_id: userId } : {}),
+      ...(employeeId ? { employee_id: employeeId } : {}),
+      read_at: new Date().toISOString(),
+    });
+    if (error && error.code !== "23505") throw error;
   },
   async tickets(options: QueryOptions = {}): Promise<HelpdeskTicket[]> {
     if (!isSupabaseConfigured || !supabase)
@@ -286,19 +538,66 @@ export const workplaceService = {
       .map(mapTicket)
       .filter((t) => matchesSearch([t.subject, t.raisedBy, t.category], options.search));
   },
-  async announcements(): Promise<Announcement[]> {
-    if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureAnnouncements);
+  async announcements(options: { includeClosed?: boolean } = {}): Promise<Announcement[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return fromFixture(
+        fixtureAnnouncements.filter(
+          (item) => options.includeClosed || (item.isActive && !item.expired),
+        ),
+      );
+    }
     const { data, error } = await supabase
       .from("announcements")
-      .select("*, author:published_by(full_name)")
+      .select(
+        "id, title, content, priority, published_at, is_active, expires_at, target_scope, target_department_id, target_role, author:published_by(full_name)",
+      )
       .order("published_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []).map(mapAnnouncement);
+    const rows = data ?? [];
+    const ids = rows.map((row) => row.id);
+    const departmentIds = [
+      ...new Set(
+        rows.map((row) => row.target_department_id).filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const readIds = new Set<string>();
+    if (ids.length) {
+      const reads = await supabase
+        .from("announcement_reads")
+        .select("announcement_id")
+        .in("announcement_id", ids);
+      if (reads.error) throw reads.error;
+      for (const row of reads.data ?? []) readIds.add(row.announcement_id);
+    }
+    const departmentNames = new Map<string, string>();
+    if (departmentIds.length) {
+      const departments = await supabase
+        .from("departments")
+        .select("id, name")
+        .in("id", departmentIds);
+      if (departments.error) throw departments.error;
+      for (const row of departments.data ?? []) {
+        if (row.id) departmentNames.set(row.id, row.name ?? "Department");
+      }
+    }
+    return rows
+      .map((row) => mapAnnouncement(row, readIds, departmentNames))
+      .filter((item) => options.includeClosed || !announcementClosed(item.isActive, item.expiresAt))
+      .sort((a, b) => {
+        const rank = (item: Announcement) =>
+          item.isActive && !item.expired ? 0 : item.expired ? 1 : 2;
+        const byState = rank(a) - rank(b);
+        if (byState !== 0) return byState;
+        return (b.publishedOn || "").localeCompare(a.publishedOn || "");
+      });
   },
   async notifications(): Promise<NotificationItem[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureNotifications);
     const userId = await currentUserId();
-    let query = supabase.from("notifications").select("*").order("created_at", { ascending: false });
+    let query = supabase
+      .from("notifications")
+      .select("*")
+      .order("created_at", { ascending: false });
     if (userId) query = query.eq("user_id", userId);
     const { data, error } = await query;
     if (error) throw error;
@@ -314,19 +613,28 @@ export const workplaceService = {
     }));
   },
   // notifications_self_all (user_id = auth.uid()) already permits an
-  // authenticated user to update their own rows -- no schema change needed
-  // for either of these, only the read path was missing a write UI before.
-  async markNotificationRead(id: string): Promise<void> {
+  // authenticated user to update their own rows -- no schema change needed.
+  async markRead(id: string): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
     const { error } = await supabase.from("notifications").update({ is_read: true }).eq("id", id);
     if (error) throw error;
   },
-  async markAllNotificationsRead(): Promise<void> {
+  async markAllRead(): Promise<void> {
     if (!isSupabaseConfigured || !supabase) return;
     const userId = await currentUserId();
     if (!userId) return;
-    const { error } = await supabase.from("notifications").update({ is_read: true }).eq("user_id", userId).eq("is_read", false);
+    const { error } = await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("user_id", userId)
+      .eq("is_read", false);
     if (error) throw error;
+  },
+  async markNotificationRead(id: string): Promise<void> {
+    return this.markRead(id);
+  },
+  async markAllNotificationsRead(): Promise<void> {
+    return this.markAllRead();
   },
   async auditTrail(options: QueryOptions = {}): Promise<AuditEntry[]> {
     if (!isSupabaseConfigured || !supabase)

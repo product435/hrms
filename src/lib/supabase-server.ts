@@ -1,6 +1,17 @@
 import { createServerClient } from "@supabase/ssr";
-import { deleteCookie, getCookies, setCookie, setResponseHeader } from "@tanstack/react-start/server";
-import { SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, isSupabaseConfigured, getSupabaseConfigStatus, type SupabaseClientLike } from "./supabase";
+import {
+  deleteCookie,
+  getCookies,
+  setCookie,
+  setResponseHeader,
+} from "@tanstack/react-start/server";
+import {
+  SUPABASE_URL,
+  SUPABASE_PUBLISHABLE_KEY,
+  isSupabaseConfigured,
+  getSupabaseConfigStatus,
+  type SupabaseClientLike,
+} from "./supabase";
 import type { Database } from "@/types/database";
 
 // Logged once, on the first real request rather than at module load, so a

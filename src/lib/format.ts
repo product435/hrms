@@ -17,7 +17,20 @@ export const INDIA_TIME_ZONE = "Asia/Kolkata";
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_ONLY = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
-const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const SHORT_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
 
 function asDate(value: string | Date): Date | null {
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import {
   candidates as fixtureCandidates,
   goals as fixtureGoals,
@@ -5,9 +6,16 @@ import {
   onboardingJourneys as fixtureOnboarding,
   performanceReviews as fixtureReviews,
 } from "@/lib/mock-data";
+import { emailHasDomain, isIndianMobile } from "@/lib/onboarding-schema";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Candidate, Goal, JobOpening, OnboardingJourney, PerformanceReview } from "@/types";
-import { fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import {
+  fromFixture,
+  logAudit,
+  matchesSearch,
+  requireOrganizationId,
+  type QueryOptions,
+} from "./api";
 const mapJob = (r: any): JobOpening => ({
   id: r.id,
   title: r.title,
@@ -27,7 +35,8 @@ const mapJob = (r: any): JobOpening => ({
 // most recent application by applied_at.
 const mapCandidate = (r: any): Candidate => {
   const applications = [...(r.job_applications ?? [])].sort(
-    (a: any, b: any) => new Date(b.applied_at ?? 0).getTime() - new Date(a.applied_at ?? 0).getTime(),
+    (a: any, b: any) =>
+      new Date(b.applied_at ?? 0).getTime() - new Date(a.applied_at ?? 0).getTime(),
   );
   const application = applications[0];
   return {
@@ -188,7 +197,10 @@ export const talentService = {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     const { error } = await supabase
       .from("onboarding_tasks")
-      .update({ completed_at: done ? new Date().toISOString() : null, status: done ? "completed" : "pending" })
+      .update({
+        completed_at: done ? new Date().toISOString() : null,
+        status: done ? "completed" : "pending",
+      })
       .eq("id", taskId);
     if (error) throw error;
   },
@@ -207,9 +219,9 @@ export const talentService = {
     return data;
   },
   // No manager-id filter here: RLS (goals_self_select OR
-  // goals_manager_view_team) already returns exactly the caller's own goals
-  // plus their direct reports' -- filtering client-side by manager_id would
-  // additionally exclude the caller's own goals from their own team view.
+  // goals_manager_view_team via can_view_employee) already returns the
+  // caller's own goals plus their department or direct reports. A manager_id
+  // filter would hide the caller's own goals and a department head's wider team.
   async goals(options: QueryOptions = {}): Promise<Goal[]> {
     if (!isSupabaseConfigured || !supabase)
       return fromFixture(
@@ -240,17 +252,21 @@ export const talentService = {
     weight?: number;
   }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { data, error } = await supabase.from("goals").insert({
-      employee_id: input.employeeId,
-      title: input.title.trim(),
-      category: input.category,
-      description: input.description?.trim() || null,
-      target: input.target?.trim() || null,
-      due_date: input.dueDate || null,
-      weight: input.weight ?? 0,
-      progress: 0,
-      status: "on-track",
-    }).select("id").single();
+    const { data, error } = await supabase
+      .from("goals")
+      .insert({
+        employee_id: input.employeeId,
+        title: input.title.trim(),
+        category: input.category,
+        description: input.description?.trim() || null,
+        target: input.target?.trim() || null,
+        due_date: input.dueDate || null,
+        weight: input.weight ?? 0,
+        progress: 0,
+        status: "on-track",
+      })
+      .select("id")
+      .single();
     if (error) throw error;
     return data;
   },
@@ -275,12 +291,14 @@ export const talentService = {
     if (fetchError) throw fetchError;
     const nextStatus =
       clamped >= 100 ? "completed" : existing.status === "completed" ? "on-track" : existing.status;
-    const { error } = await supabase.from("goals").update({ progress: clamped, status: nextStatus }).eq("id", goalId);
+    const { error } = await supabase
+      .from("goals")
+      .update({ progress: clamped, status: nextStatus })
+      .eq("id", goalId);
     if (error) throw error;
   },
   async goalsOf(employeeId: string): Promise<Goal[]> {
-    if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureGoals);
+    if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureGoals);
     const { data, error } = await supabase
       .from("goals")
       .select("*, employees!inner(first_name,last_name)")
@@ -288,20 +306,21 @@ export const talentService = {
     if (error) throw error;
     return (data ?? []).map(mapGoal);
   },
-  // Same reasoning as goals(): RLS already unions "my own reviews" with "my
-  // direct reports'" for a manager, so no client-side manager_id filter.
+  // Same reasoning as goals(): RLS already unions own reviews with the
+  // department (department head) or direct reports (team lead).
   async reviews(): Promise<PerformanceReview[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureReviews);
     const { data, error } = await supabase
       .from("performance_reviews")
-      .select("*, employees!inner(first_name,last_name,manager_id), reviewer:reviewer_id(full_name)")
+      .select(
+        "*, employees!inner(first_name,last_name,manager_id), reviewer:reviewer_id(full_name)",
+      )
       .order("reviewed_at", { ascending: false });
     if (error) throw error;
     return (data ?? []).map(mapReview);
   },
   async reviewsOf(employeeId: string): Promise<PerformanceReview[]> {
-    if (!isSupabaseConfigured || !supabase)
-      return fromFixture(fixtureReviews);
+    if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureReviews);
     const { data, error } = await supabase
       .from("performance_reviews")
       .select("*, employees!inner(first_name,last_name), reviewer:reviewer_id(full_name)")
@@ -334,7 +353,10 @@ export const talentService = {
     }));
     const { error } = await supabase.from("performance_reviews").insert(rows);
     if (error) throw error;
-    void logAudit("performance_cycle_create", "performance_reviews", null, null, { cycle: cycleName, employees: rows.length });
+    void logAudit("performance_cycle_create", "performance_reviews", null, null, {
+      cycle: cycleName,
+      employees: rows.length,
+    });
   },
   async submitSelfReview(reviewId: string, input: { selfRating: number; feedback?: string }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
@@ -371,11 +393,15 @@ export const talentService = {
     experienceYears?: number;
   }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const email = input.email?.trim() ?? "";
+    const phone = input.phone?.trim() ?? "";
+    if (email && !emailHasDomain(email)) throw new Error("Enter a valid email.");
+    if (!isIndianMobile(phone)) throw new Error("Enter a 10-digit mobile number.");
     const { error } = await supabase.rpc("add_candidate_application", {
       p_job_id: input.jobId,
       p_name: input.name,
-      ...(input.email ? { p_email: input.email } : {}),
-      ...(input.phone ? { p_phone: input.phone } : {}),
+      ...(email ? { p_email: email } : {}),
+      p_phone: phone,
       ...(input.source ? { p_source: input.source } : {}),
       ...(input.experienceYears != null ? { p_experience_years: input.experienceYears } : {}),
     });
@@ -383,7 +409,10 @@ export const talentService = {
   },
   async moveCandidateStage(applicationId: string, stage: Candidate["stage"]) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from("job_applications").update({ stage }).eq("id", applicationId);
+    const { error } = await supabase
+      .from("job_applications")
+      .update({ stage })
+      .eq("id", applicationId);
     if (error) throw error;
   },
 };

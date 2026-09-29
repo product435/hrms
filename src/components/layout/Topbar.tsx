@@ -5,6 +5,7 @@ import {
   Bell,
   Loader2,
   LogOut,
+  MonitorSmartphone,
   Menu,
   Moon,
   Search,
@@ -14,7 +15,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { CommandPalette } from "@/components/layout/CommandPalette";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,32 +28,27 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 import { useTheme } from "@/hooks/useTheme";
+import { indianDateTime } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import { workplaceService } from "@/services/workplaceService";
-import { assetService } from "@/services/assetService";
-import { employeeService } from "@/services/employeeService";
-
-type SearchResult = {
-  id: string;
-  label: string;
-  detail: string;
-  kind: "employee" | "asset" | "request";
-};
 
 export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const { user, role, signOut, can } = useSession();
   const navigate = useNavigate();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
-  const [search, setSearch] = useState("");
-  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState<"local" | "global" | null>(null);
 
-  async function handleSignOut() {
-    if (isSigningOut) return;
-    setIsSigningOut(true);
-    const result = await signOut();
+  async function handleSignOut(scope: "local" | "global") {
+    if (signingOut) return;
+    setSigningOut(scope);
+    const result = await signOut({ scope });
     if (result.error) {
-      toast.error("Sign out failed", { description: result.error.message });
-      setIsSigningOut(false);
+      toast.error(scope === "global" ? "Could not sign out of all devices" : "Sign out failed", {
+        description: result.error.message,
+      });
+      setSigningOut(null);
       return;
     }
 
@@ -60,50 +56,18 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
     await router.invalidate();
   }
   const notifications = useQuery({
-    queryKey: ["notifications", "topbar"],
+    queryKey: queryKeys.notifications.topbar,
     queryFn: () => workplaceService.notifications(),
   });
   const notificationItems = notifications.data ?? [];
   const unread = notificationItems.filter((n) => !n.read).length;
-  const searchQuery = useQuery({
-    queryKey: ["global-search", search.trim()],
-    enabled: search.trim().length >= 2,
-    queryFn: async (): Promise<SearchResult[]> => {
-      const [employees, assets, requests] = await Promise.all([
-        employeeService.list({ search: search.trim() }),
-        assetService.list({ search: search.trim() }),
-        workplaceService.tickets({ search: search.trim() }),
-      ]);
-      return [
-        ...employees.slice(0, 4).map((employee) => ({
-          id: employee.id,
-          label: `${employee.firstName} ${employee.lastName}`,
-          detail: `${employee.designation} · ${employee.department}`,
-          kind: "employee" as const,
-        })),
-        ...assets.slice(0, 3).map((asset) => ({
-          id: asset.id,
-          label: asset.name,
-          detail: `${asset.tag} · ${asset.status}`,
-          kind: "asset" as const,
-        })),
-        ...requests.slice(0, 3).map((request) => ({
-          id: request.id,
-          label: request.subject,
-          detail: `${request.category} · ${request.status}`,
-          kind: "request" as const,
-        })),
-      ];
-    },
-  });
-  const searchResults = searchQuery.data ?? [];
   const initials = user.name
     .split(" ")
     .map((part) => part[0])
     .join("");
 
   return (
-    <header className="sticky top-0 z-30 flex h-[4.5rem] items-center gap-2 border-b border-border/80 bg-background/85 px-3 backdrop-blur-xl sm:gap-3 sm:px-5 lg:px-6">
+    <header className="sticky top-0 z-30 flex h-18 items-center gap-2 border-b border-border/80 bg-background/85 px-3 backdrop-blur-xl sm:gap-3 sm:px-5 lg:px-6">
       <Button
         variant="ghost"
         size="icon"
@@ -114,51 +78,29 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
         <Menu className="size-5" />
       </Button>
 
-      <div className="relative hidden min-w-0 flex-1 md:block md:max-w-md">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          className="h-10 bg-surface-2/70 pl-9"
-          placeholder="Search people, assets, requests…"
-          aria-label="Global search"
-        />
-        {search.trim().length >= 2 ? (
-          <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-2xl border border-border bg-popover p-1.5 shadow-float">
-            {searchQuery.isLoading ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">Searching…</p>
-            ) : searchResults.length === 0 ? (
-              <p className="px-3 py-4 text-center text-xs text-muted-foreground">
-                No results found.
-              </p>
-            ) : (
-              searchResults.map((result) => (
-                <button
-                  key={`${result.kind}-${result.id}`}
-                  type="button"
-                  className="flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted"
-                  onClick={() => {
-                    setSearch("");
-                    if (result.kind === "employee") {
-                      navigate({ to: "/employees/$employeeId", params: { employeeId: result.id } });
-                    } else {
-                      navigate({ to: result.kind === "asset" ? "/assets" : "/helpdesk" });
-                    }
-                  }}
-                >
-                  <span className="mt-1 size-2 shrink-0 rounded-full bg-primary" />
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-medium">{result.label}</span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {result.detail}
-                    </span>
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        ) : null}
-      </div>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => setPaletteOpen(true)}
+        className="hidden h-10 min-w-0 flex-1 justify-start bg-surface-2/70 px-3 font-normal text-muted-foreground hover:translate-y-0 md:flex md:max-w-md"
+      >
+        <Search className="size-4" />
+        <span className="truncate">Search people, assets, requests</span>
+        <kbd className="ml-auto hidden rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground lg:inline">
+          Ctrl K
+        </kbd>
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="md:hidden"
+        onClick={() => setPaletteOpen(true)}
+        aria-label="Search"
+      >
+        <Search className="size-5" />
+      </Button>
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
         <div className="hidden items-center gap-2 rounded-lg border border-border px-3 py-2 sm:flex">
@@ -202,7 +144,9 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
                 <li key={item.id} className="px-4 py-3">
                   <p className="text-sm font-medium">{item.title}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground/80">{item.createdAt}</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground/80">
+                    {indianDateTime(item.createdAt)}
+                  </p>
                 </li>
               ))}
             </ul>
@@ -231,7 +175,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
               </span>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuLabel className="font-normal">
               <p className="text-sm font-semibold">{user.name}</p>
               <p className="text-xs text-muted-foreground">{user.email}</p>
@@ -242,7 +186,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
                 <UserCircle2 className="size-4" /> My profile
               </Link>
             </DropdownMenuItem>
-            {can(["admin", "hr", "manager"]) ? (
+            {can(["admin", "hr", "dept_head", "team_lead"]) ? (
               <DropdownMenuItem asChild>
                 <Link to="/settings">
                   <Settings className="size-4" /> Settings
@@ -252,18 +196,33 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="cursor-pointer"
-              disabled={isSigningOut}
+              disabled={signingOut !== null}
               onSelect={(event) => {
                 event.preventDefault();
-                void handleSignOut();
+                void handleSignOut("local");
               }}
             >
-              {isSigningOut ? (
+              {signingOut === "local" ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <LogOut className="size-4" />
               )}
-              {isSigningOut ? "Signing out…" : "Sign out"}
+              {signingOut === "local" ? "Signing out…" : "Sign out"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="cursor-pointer"
+              disabled={signingOut !== null}
+              onSelect={(event) => {
+                event.preventDefault();
+                void handleSignOut("global");
+              }}
+            >
+              {signingOut === "global" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <MonitorSmartphone className="size-4" />
+              )}
+              {signingOut === "global" ? "Signing out…" : "Sign out of all devices"}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

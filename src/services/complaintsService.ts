@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { Complaint, ComplaintPriority, ComplaintStatus } from "@/types";
 import { requireEmployeeId } from "./api";
@@ -27,7 +28,9 @@ export const complaintsService = {
     if (!isSupabaseConfigured || !supabase) return [];
     const { data, error } = await supabase
       .from("employee_complaints")
-      .select("*, employees!employee_complaints_employee_id_fkey(first_name,last_name), assignee:assigned_to(first_name,last_name)")
+      .select(
+        "*, employees!employee_complaints_employee_id_fkey(first_name,last_name), assignee:assigned_to(first_name,last_name)",
+      )
       .eq("employee_id", employeeId)
       .order("created_at", { ascending: false });
     if (error) throw error;
@@ -37,7 +40,12 @@ export const complaintsService = {
   // the organization; that cross-user step can't happen from the employee's
   // own RLS-scoped session, so it's done server-side via a SECURITY DEFINER
   // RPC that inserts the complaint and the notifications atomically.
-  async create(input: { subject: string; category: string; description: string; priority: ComplaintPriority }) {
+  async create(input: {
+    subject: string;
+    category: string;
+    description: string;
+    priority: ComplaintPriority;
+  }) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     await requireEmployeeId();
     const { data, error } = await supabase.rpc("create_employee_complaint", {
@@ -56,7 +64,10 @@ export const complaintsService = {
   },
   async updateAssignee(id: string, assignedTo: string | null) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from("employee_complaints").update({ assigned_to: assignedTo }).eq("id", id);
+    const { error } = await supabase
+      .from("employee_complaints")
+      .update({ assigned_to: assignedTo })
+      .eq("id", id);
     if (error) throw error;
   },
 };

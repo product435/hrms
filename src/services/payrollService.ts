@@ -1,10 +1,105 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { payrollRuns as fixtureRuns, payslips as fixturePayslips } from "@/lib/mock-data";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PayrollRun, Payslip } from "@/types";
-import { currentUserId, fromFixture, logAudit, matchesSearch, requireOrganizationId, type QueryOptions } from "./api";
+import {
+  currentUserId,
+  fromFixture,
+  logAudit,
+  matchesSearch,
+  requireOrganizationId,
+  type QueryOptions,
+} from "./api";
 const periodOf = (year: unknown, month: unknown) =>
   year && month ? `${year}-${String(month).padStart(2, "0")}` : "";
+
+const periodEndDate = (year: number, month: number) =>
+  new Date(year, month, 0).toISOString().slice(0, 10);
+
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MONEY = /^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/;
+
+export type SalaryAmounts = {
+  basic: number;
+  hra: number;
+  allowances: number;
+  bonus: number;
+};
+
+export type CurrentSalaryStructure = {
+  employeeId: string;
+  employeeName: string;
+  employeeCode: string;
+  structure: {
+    id: string;
+    effectiveFrom: string;
+    basic: number;
+    hra: number;
+    allowances: number;
+    bonus: number;
+    deductions: number;
+    gross: number;
+  } | null;
+};
+
+export type SalaryStructureInput = {
+  id?: string | null;
+  employeeId: string;
+  effectiveFrom: string;
+  basic: number;
+  hra: number;
+  allowances: number;
+  bonus: number;
+  deductions: number;
+};
+
+function raise(error: { message: string }): never {
+  throw new Error(error.message || "Supabase request failed.");
+}
+
+export function salaryGross(amounts: SalaryAmounts) {
+  return Math.round((amounts.basic + amounts.hra + amounts.allowances + amounts.bonus) * 100) / 100;
+}
+
+export function readSalaryAmount(value: string, label: string) {
+  const trimmed = value.trim().replace(/,/g, "");
+  if (!trimmed) throw new Error(`${label} is required.`);
+  if (!MONEY.test(trimmed)) throw new Error(`${label} must be zero or greater.`);
+  return Math.round(Number(trimmed) * 100) / 100;
+}
+
+export function readSalaryDate(value: string) {
+  const match = DATE_ONLY.exec(value.trim());
+  if (!match) throw new Error("Effective from must be a date.");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    throw new Error("Effective from must be a date.");
+  }
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
+function assertStoredAmount(amount: number, label: string) {
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`${label} must be zero or greater.`);
+  return Math.round(amount * 100) / 100;
+}
+
+async function requireAdminOrHr() {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data, error } = await supabase.rpc("current_user_role");
+  if (error) raise(error);
+  const role = String(data ?? "").toLowerCase();
+  if (role !== "admin" && role !== "hr") {
+    throw new Error("Only admin and HR can manage salary structures.");
+  }
+}
 
 const mapRun = (r: any): PayrollRun => {
   const records = r.payroll_records ?? [];
@@ -66,7 +161,10 @@ async function buildPayslipPdf(input: {
   const margin = 48;
   let y = height - margin;
 
-  const line = (text: string, opts: { size?: number; useBold?: boolean; color?: [number, number, number]; gap?: number } = {}) => {
+  const line = (
+    text: string,
+    opts: { size?: number; useBold?: boolean; color?: [number, number, number]; gap?: number } = {},
+  ) => {
     const size = opts.size ?? 11;
     page.drawText(text, {
       x: margin,
@@ -79,7 +177,13 @@ async function buildPayslipPdf(input: {
   };
   const row = (label: string, value: string) => {
     page.drawText(label, { x: margin, y, size: 11, font, color: rgb(0.35, 0.35, 0.35) });
-    page.drawText(value, { x: width - margin - font.widthOfTextAtSize(value, 11), y, size: 11, font, color: rgb(0.1, 0.1, 0.1) });
+    page.drawText(value, {
+      x: width - margin - font.widthOfTextAtSize(value, 11),
+      y,
+      size: 11,
+      font,
+      color: rgb(0.1, 0.1, 0.1),
+    });
     y -= 20;
   };
 
@@ -87,32 +191,93 @@ async function buildPayslipPdf(input: {
   line(`Payslip for ${input.period}`, { size: 13, useBold: true, gap: 20 });
   line(`Employee: ${input.employeeName}`, { size: 11, gap: 24 });
 
-  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
+  page.drawLine({
+    start: { x: margin, y },
+    end: { x: width - margin, y },
+    thickness: 1,
+    color: rgb(0.85, 0.85, 0.85),
+  });
   y -= 20;
+
+  const statutoryLine = (label: string, amount: number) => {
+    row(label, amount === 0 ? "Not configured" : `-${amount.toFixed(2)}`);
+  };
 
   row("Basic", input.basic.toFixed(2));
   row("HRA", input.hra.toFixed(2));
   row("Allowances", input.allowances.toFixed(2));
   row("Bonus", input.bonus.toFixed(2));
-  row("PF", `-${input.pf.toFixed(2)}`);
-  row("Tax", `-${input.tax.toFixed(2)}`);
+  statutoryLine("PF", input.pf);
+  statutoryLine("Tax", input.tax);
   row("Total deductions", `-${input.totalDeductions.toFixed(2)}`);
 
-  page.drawLine({ start: { x: margin, y }, end: { x: width - margin, y }, thickness: 1, color: rgb(0.85, 0.85, 0.85) });
+  page.drawLine({
+    start: { x: margin, y },
+    end: { x: width - margin, y },
+    thickness: 1,
+    color: rgb(0.85, 0.85, 0.85),
+  });
   y -= 22;
   page.drawText("Net pay", { x: margin, y, size: 13, font: bold, color: rgb(0.1, 0.1, 0.1) });
   const netText = input.netSalary.toFixed(2);
-  page.drawText(netText, { x: width - margin - bold.widthOfTextAtSize(netText, 13), y, size: 13, font: bold, color: rgb(0.1, 0.4, 0.2) });
-
-  page.drawText(`Generated on ${new Date().toISOString().slice(0, 10)} · This is a system-generated payslip.`, {
-    x: margin,
-    y: margin / 2,
-    size: 8,
-    font,
-    color: rgb(0.55, 0.55, 0.55),
+  page.drawText(netText, {
+    x: width - margin - bold.widthOfTextAtSize(netText, 13),
+    y,
+    size: 13,
+    font: bold,
+    color: rgb(0.1, 0.4, 0.2),
   });
 
+  page.drawText(
+    `Generated on ${new Date().toISOString().slice(0, 10)} · This is a system-generated payslip.`,
+    {
+      x: margin,
+      y: margin / 2,
+      size: 8,
+      font,
+      color: rgb(0.55, 0.55, 0.55),
+    },
+  );
+
   return doc.save();
+}
+
+function privatePdfPath(stored: string | null | undefined) {
+  if (!stored) return null;
+  const path = stored.trim();
+  if (!path || /^https?:\/\//i.test(path) || !/\.pdf$/i.test(path)) return null;
+  return path;
+}
+
+async function payslipPdfObjectUrl(recordId: string) {
+  if (!supabase) throw new Error("Supabase is not configured.");
+  const { data: record, error } = await supabase
+    .from("payroll_records")
+    .select(
+      "basic, hra, allowances, bonus, pf, tax, total_deductions, net_salary, employees(first_name,last_name), payroll_runs(year,month)",
+    )
+    .eq("id", recordId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!record) throw new Error("Payroll record not found.");
+
+  const employee = record.employees;
+  const employeeName = employee
+    ? `${employee.first_name ?? ""} ${employee.last_name ?? ""}`.trim() || "Employee"
+    : "Employee";
+  const pdfBytes = await buildPayslipPdf({
+    employeeName,
+    period: periodOf(record.payroll_runs?.year, record.payroll_runs?.month),
+    basic: Number(record.basic ?? 0),
+    hra: Number(record.hra ?? 0),
+    allowances: Number(record.allowances ?? 0),
+    bonus: Number(record.bonus ?? 0),
+    pf: Number(record.pf ?? 0),
+    tax: Number(record.tax ?? 0),
+    totalDeductions: Number(record.total_deductions ?? 0),
+    netSalary: Number(record.net_salary ?? 0),
+  });
+  return URL.createObjectURL(new Blob([pdfBytes as BlobPart], { type: "application/pdf" }));
 }
 
 export const payrollService = {
@@ -135,7 +300,8 @@ export const payrollService = {
       .eq("month", input.month)
       .maybeSingle();
     if (existing.error) throw existing.error;
-    if (existing.data?.status === "processed" || existing.data?.status === "approved") return existing.data;
+    if (existing.data?.status === "processed" || existing.data?.status === "approved")
+      return existing.data;
 
     const { data: run, error: runError } = await supabase
       .from("payroll_runs")
@@ -147,7 +313,7 @@ export const payrollService = {
       .single();
     if (runError) throw runError;
 
-    const periodEnd = new Date(input.year, input.month, 0).toISOString().slice(0, 10);
+    const periodEnd = periodEndDate(input.year, input.month);
     const { data: employees, error: employeesError } = await supabase
       .from("employees")
       .select("id")
@@ -159,7 +325,7 @@ export const payrollService = {
 
     const { data: structures, error: structuresError } = await supabase
       .from("salary_structures")
-      .select("employee_id,basic,hra,allowances,bonus,gross_salary,deductions,effective_from")
+      .select("employee_id,basic,hra,allowances,bonus,deductions,effective_from")
       .in("employee_id", employeeIds)
       .lte("effective_from", periodEnd)
       .order("effective_from", { ascending: false });
@@ -174,16 +340,20 @@ export const payrollService = {
     const records = employeeIds.flatMap((employeeId) => {
       const structure = latestByEmployee.get(employeeId);
       if (!structure) return [];
-      const gross = Number(structure.gross_salary ?? 0);
+      const basic = Number(structure.basic ?? 0);
+      const hra = Number(structure.hra ?? 0);
+      const allowances = Number(structure.allowances ?? 0);
+      const bonus = Number(structure.bonus ?? 0);
+      const gross = salaryGross({ basic, hra, allowances, bonus });
       const deductions = Number(structure.deductions ?? 0);
       return [
         {
           employee_id: employeeId,
           payroll_run_id: run.id,
-          basic: structure.basic ?? 0,
-          hra: structure.hra ?? 0,
-          allowances: structure.allowances ?? 0,
-          bonus: structure.bonus ?? 0,
+          basic,
+          hra,
+          allowances,
+          bonus,
           gross_salary: gross,
           pf: 0,
           tax: 0,
@@ -200,7 +370,11 @@ export const payrollService = {
         .upsert(records, { onConflict: "employee_id,payroll_run_id" });
       if (recordsError) throw recordsError;
     }
-    void logAudit("payroll_run_start", "payroll_runs", run.id, null, { year: input.year, month: input.month, employees: records.length });
+    void logAudit("payroll_run_start", "payroll_runs", run.id, null, {
+      year: input.year,
+      month: input.month,
+      employees: records.length,
+    });
     return run;
   },
   // Locks a draft run's numbers and hands it off for approval. Deliberately
@@ -257,13 +431,17 @@ export const payrollService = {
     if (fetchError) throw fetchError;
     if (run.status !== "processed") {
       throw new Error(
-        run.status === "approved" ? "This run has already been approved." : "This run must be processed before it can be approved.",
+        run.status === "approved"
+          ? "This run has already been approved."
+          : "This run must be processed before it can be approved.",
       );
     }
 
     const { data: records, error: recordsError } = await supabase
       .from("payroll_records")
-      .select("id, employee_id, basic, hra, allowances, bonus, pf, tax, total_deductions, net_salary, employees(first_name,last_name)")
+      .select(
+        "id, employee_id, basic, hra, allowances, bonus, pf, tax, total_deductions, net_salary, employees(first_name,last_name)",
+      )
       .eq("payroll_run_id", runId);
     if (recordsError) throw recordsError;
     if (!records?.length) throw new Error("This payroll run has no records to approve.");
@@ -286,7 +464,9 @@ export const payrollService = {
 
     const period = periodOf(run.year, run.month);
     for (const r of missing) {
-      const name = r.employees ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim() : "Employee";
+      const name = r.employees
+        ? `${r.employees.first_name ?? ""} ${r.employees.last_name ?? ""}`.trim()
+        : "Employee";
       const totalDeductions = Number(r.total_deductions ?? 0);
       const pdfBytes = await buildPayslipPdf({
         employeeName: name,
@@ -303,7 +483,9 @@ export const payrollService = {
       const path = `${r.employee_id}/payslip-${period}.pdf`;
       const upload = await supabase.storage
         .from("documents")
-        .upload(path, new Blob([pdfBytes as BlobPart], { type: "application/pdf" }), { upsert: true });
+        .upload(path, new Blob([pdfBytes as BlobPart], { type: "application/pdf" }), {
+          upsert: true,
+        });
       if (upload.error) throw upload.error;
       const { error: insertError } = await supabase
         .from("payslips")
@@ -316,7 +498,10 @@ export const payrollService = {
       .update({ status: "approved" })
       .eq("id", runId);
     if (approveError) throw approveError;
-    void logAudit("payroll_run_approve", "payroll_runs", runId, null, { period, records: records.length });
+    void logAudit("payroll_run_approve", "payroll_runs", runId, null, {
+      period,
+      records: records.length,
+    });
   },
   // Sends a processed-but-not-yet-approved run back to draft for correction
   // (e.g. a salary structure needs fixing before payout) -- there is no
@@ -332,7 +517,11 @@ export const payrollService = {
       .single();
     if (fetchError) throw fetchError;
     if (run.status !== "processed") {
-      throw new Error(run.status === "approved" ? "An approved run cannot be rejected." : "Only a processed run can be rejected.");
+      throw new Error(
+        run.status === "approved"
+          ? "An approved run cannot be rejected."
+          : "Only a processed run can be rejected.",
+      );
     }
     const { error } = await supabase
       .from("payroll_runs")
@@ -340,6 +529,114 @@ export const payrollService = {
       .eq("id", runId);
     if (error) throw error;
     void logAudit("payroll_run_reject", "payroll_runs", runId, null, { status: "draft" });
+  },
+  async currentStructures(): Promise<CurrentSalaryStructure[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    await requireAdminOrHr();
+    const organizationId = await requireOrganizationId();
+    const now = new Date();
+    const periodEnd = periodEndDate(now.getFullYear(), now.getMonth() + 1);
+
+    const { data: employees, error: employeesError } = await supabase
+      .from("employees")
+      .select("id, first_name, last_name, employee_code")
+      .eq("organization_id", organizationId)
+      .eq("employment_status", "active")
+      .order("first_name");
+    if (employeesError) raise(employeesError);
+
+    const employeeIds = (employees ?? []).map((employee) => employee.id);
+    if (!employeeIds.length) return [];
+
+    const { data: structures, error: structuresError } = await supabase
+      .from("salary_structures")
+      .select("id, employee_id, effective_from, basic, hra, allowances, bonus, deductions")
+      .in("employee_id", employeeIds)
+      .lte("effective_from", periodEnd)
+      .order("effective_from", { ascending: false });
+    if (structuresError) raise(structuresError);
+
+    const latestByEmployee = new Map<string, (typeof structures)[number]>();
+    (structures ?? []).forEach((row) => {
+      if (!row.employee_id || latestByEmployee.has(row.employee_id)) return;
+      latestByEmployee.set(row.employee_id, row);
+    });
+
+    return (employees ?? []).map((employee) => {
+      const row = latestByEmployee.get(employee.id);
+      const basic = Number(row?.basic ?? 0);
+      const hra = Number(row?.hra ?? 0);
+      const allowances = Number(row?.allowances ?? 0);
+      const bonus = Number(row?.bonus ?? 0);
+      const name = `${employee.first_name ?? ""} ${employee.last_name ?? ""}`.trim();
+      return {
+        employeeId: employee.id,
+        employeeName: name || employee.employee_code || "Employee",
+        employeeCode: employee.employee_code ?? "",
+        structure: row
+          ? {
+              id: row.id,
+              effectiveFrom: row.effective_from ?? "",
+              basic,
+              hra,
+              allowances,
+              bonus,
+              deductions: Number(row.deductions ?? 0),
+              gross: salaryGross({ basic, hra, allowances, bonus }),
+            }
+          : null,
+      };
+    });
+  },
+  async saveStructure(input: SalaryStructureInput) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    await requireAdminOrHr();
+    if (!input.employeeId) throw new Error("Choose an employee.");
+    const effectiveFrom = readSalaryDate(input.effectiveFrom);
+    const basic = assertStoredAmount(input.basic, "Basic");
+    const hra = assertStoredAmount(input.hra, "HRA");
+    const allowances = assertStoredAmount(input.allowances, "Allowances");
+    const bonus = assertStoredAmount(input.bonus, "Bonus");
+    const deductions = assertStoredAmount(input.deductions, "Deductions");
+    const gross = salaryGross({ basic, hra, allowances, bonus });
+    const amounts = {
+      effective_from: effectiveFrom,
+      basic,
+      hra,
+      allowances,
+      bonus,
+      deductions,
+      gross_salary: gross,
+    };
+
+    if (input.id) {
+      const { data, error } = await supabase
+        .from("salary_structures")
+        .update(amounts)
+        .eq("id", input.id)
+        .eq("employee_id", input.employeeId)
+        .select("id")
+        .maybeSingle();
+      if (error) raise(error);
+      if (!data) throw new Error("Salary structure was not saved.");
+      void logAudit("salary_structure_update", "salary_structures", data.id, null, {
+        employee_id: input.employeeId,
+        ...amounts,
+      });
+      return data;
+    }
+
+    const { data, error } = await supabase
+      .from("salary_structures")
+      .insert({ employee_id: input.employeeId, ...amounts })
+      .select("id")
+      .single();
+    if (error) raise(error);
+    void logAudit("salary_structure_create", "salary_structures", data.id, null, {
+      employee_id: input.employeeId,
+      ...amounts,
+    });
+    return data;
   },
   async runs(): Promise<PayrollRun[]> {
     if (!isSupabaseConfigured || !supabase) return fromFixture(fixtureRuns);
@@ -366,7 +663,8 @@ export const payrollService = {
       .select("*, employees(first_name,last_name), payroll_runs(year,month), payslips(id)")
       .order("payroll_run_id", { ascending: false });
     if (options.employeeId) query = query.eq("employee_id", options.employeeId);
-    if (options.status && options.status !== "all") query = query.eq("payment_status", options.status);
+    if (options.status && options.status !== "all")
+      query = query.eq("payment_status", options.status);
     const { data, error } = await query;
     if (error) throw error;
     return (data ?? [])
@@ -377,19 +675,21 @@ export const payrollService = {
     if (!isSupabaseConfigured || !supabase) return fromFixture({ id, url: null });
     const { data, error } = await supabase
       .from("payslips")
-      .select("payslip_url")
+      .select("payroll_record_id, payslip_url")
       .or(`id.eq.${id},payroll_record_id.eq.${id}`)
       .maybeSingle();
     if (error) throw error;
-    const stored = data?.payslip_url ?? null;
-    if (!stored) return { id, url: null };
-    // Older/seed rows may hold a plain external URL (never a real private
-    // file) -- opened as-is, unchanged from before. New rows hold a private
-    // documents-bucket object path, exchanged for a short-lived signed URL
-    // exactly like Documents' own View/Open does.
-    if (/^https?:\/\//i.test(stored)) return { id, url: stored };
-    const signed = await supabase.storage.from("documents").createSignedUrl(stored, 120);
-    if (signed.error) throw signed.error;
-    return { id, url: signed.data?.signedUrl ?? null };
+    // Private documents-bucket paths ending in .pdf keep a short-lived signed
+    // URL. Missing values, non-PDF objects (.txt), and external placeholders
+    // are rendered here from the payroll record. Approved runs freeze
+    // payslips, so the stored payslip_url is left unchanged.
+    const pdfPath = privatePdfPath(data?.payslip_url);
+    if (pdfPath) {
+      const signed = await supabase.storage.from("documents").createSignedUrl(pdfPath, 120);
+      if (signed.error) throw signed.error;
+      return { id, url: signed.data?.signedUrl ?? null };
+    }
+    const recordId = data?.payroll_record_id ?? id;
+    return { id, url: await payslipPdfObjectUrl(recordId) };
   },
 };

@@ -25,8 +25,8 @@ function UnauthorizedPage() {
         <div className="max-w-md space-y-2">
           <h1 className="text-2xl font-bold">Access denied</h1>
           <p className="text-sm text-muted-foreground">
-            Your {ROLE_LABELS[role]} account does not have permission to view this page. Contact HR or
-            your administrator if you believe this is a mistake.
+            Your {ROLE_LABELS[role]} account does not have permission to view this page. Contact HR
+            or your administrator if you believe this is a mistake.
           </p>
         </div>
         <div className="flex flex-wrap justify-center gap-2">

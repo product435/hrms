@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
 import {
   assets as fixtureAssets,
   attendance as fixtureAttendance,
@@ -122,11 +123,14 @@ export const insightsService = {
       headcount: headcount ?? 0,
       presentToday: (att ?? []).filter((r) => r.status === "present").length,
       onLeaveToday: (leaves ?? []).filter(
-        (r) => r.status === "approved" && (r.start_date ?? "") <= today && (r.end_date ?? "") >= today,
+        (r) =>
+          r.status === "approved" && (r.start_date ?? "") <= today && (r.end_date ?? "") >= today,
       ).length,
       wfhToday: (att ?? []).filter((r) => r.status === "wfh").length,
       lateToday: (att ?? []).filter((r) => r.status === "late").length,
-      attritionRate: headcount ? Number((((exitsLast12Months ?? 0) / headcount) * 100).toFixed(1)) : null,
+      attritionRate: headcount
+        ? Number((((exitsLast12Months ?? 0) / headcount) * 100).toFixed(1))
+        : null,
       openPositions: (jobs ?? []).length,
       pendingApprovals: (leaves ?? []).filter((r) => r.status === "pending").length,
       payrollNet,
@@ -189,7 +193,8 @@ export const insightsService = {
       // A resigned employee with no exit_date set yet (legacy row, or the
       // date was left blank) is intentionally not counted here rather than
       // guessed at from an unrelated timestamp.
-      if (r.employment_status === "resigned" && r.exit_date) bump(r.exit_date.slice(0, 7), "exited");
+      if (r.employment_status === "resigned" && r.exit_date)
+        bump(r.exit_date.slice(0, 7), "exited");
     });
     const currentLabel = monthLabel(new Date());
     const trailingWindowStart = addMonths(currentLabel, -5);
@@ -202,7 +207,10 @@ export const insightsService = {
     // if real data goes back further, so the running total accumulates from
     // the true start of history.
     const earliestDataLabel = dataLabels[0];
-    const earliestLabel = earliestDataLabel && earliestDataLabel < trailingWindowStart ? earliestDataLabel : trailingWindowStart;
+    const earliestLabel =
+      earliestDataLabel && earliestDataLabel < trailingWindowStart
+        ? earliestDataLabel
+        : trailingWindowStart;
     const allLabels: string[] = [];
     for (let label = earliestLabel; label <= currentLabel; label = addMonths(label, 1)) {
       allLabels.push(label);
@@ -237,10 +245,17 @@ export const insightsService = {
     // explicit here too so the query itself (not just the policy) reflects
     // that data flow.
     const organizationId = await requireOrganizationId();
-    const [{ data: departments, error: departmentError }, { data: employees, error: employeeError }] = await Promise.all([
+    const [
+      { data: departments, error: departmentError },
+      { data: employees, error: employeeError },
+    ] = await Promise.all([
       supabase.from("departments").select("id,name").eq("organization_id", organizationId),
       managerId
-        ? supabase.from("employees").select("department_id").eq("organization_id", organizationId).eq("manager_id", managerId)
+        ? supabase
+            .from("employees")
+            .select("department_id")
+            .eq("organization_id", organizationId)
+            .eq("manager_id", managerId)
         : supabase.from("employees").select("department_id").eq("organization_id", organizationId),
     ]);
     if (departmentError) throw departmentError;
@@ -248,7 +263,8 @@ export const insightsService = {
     const counts = new Map<string, number>();
     let unassigned = 0;
     (employees ?? []).forEach((employee) => {
-      if (employee.department_id) counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1);
+      if (employee.department_id)
+        counts.set(employee.department_id, (counts.get(employee.department_id) ?? 0) + 1);
       else unassigned += 1;
     });
     // Same normalized-name aggregation as employeeService.departments(), so
@@ -279,7 +295,9 @@ export const insightsService = {
           value: fixtureLeave.filter((l) => l.type === type).reduce((s, l) => s + l.days, 0),
         })),
       );
-    const { data, error } = await supabase.from("leave_requests").select("total_days, leave_types(name)");
+    const { data, error } = await supabase
+      .from("leave_requests")
+      .select("total_days, leave_types(name)");
     if (error) throw error;
     const map = new Map<string, number>();
     (data ?? []).forEach((r) => {

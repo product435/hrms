@@ -17,6 +17,19 @@ dist-ssr
 .nitro
 *.local
 
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Supabase CLI local cache
+supabase/.temp/
+
+# Local tool caches
+coverage
+*.tsbuildinfo
+.eslintcache
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

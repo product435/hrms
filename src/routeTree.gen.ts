@@ -14,6 +14,7 @@ import { Route as AnnouncementsRouteImport } from './routes/announcements'
 import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as AttendanceRouteImport } from './routes/attendance'
 import { Route as AuditRouteImport } from './routes/audit'
+import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
 import { Route as DepartmentsRouteImport } from './routes/departments'
 import { Route as DesignationsRouteImport } from './routes/designations'
 import { Route as DocumentsRouteImport } from './routes/documents'
@@ -21,19 +22,23 @@ import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as HelpdeskRouteImport } from './routes/helpdesk'
+import { Route as KraRouteImport } from './routes/kra'
 import { Route as LeaveRouteImport } from './routes/leave'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as PayrollRouteImport } from './routes/payroll'
 import { Route as PerformanceRouteImport } from './routes/performance'
+import { Route as ProfileStatusRouteImport } from './routes/profile-status'
 import { Route as RecruitmentRouteImport } from './routes/recruitment'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as RolesRouteImport } from './routes/roles'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ShiftsRouteImport } from './routes/shifts'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SignUpRouteImport } from './routes/sign-up'
 import { Route as UnauthorizedRouteImport } from './routes/unauthorized'
+import { Route as WorkRouteImport } from './routes/work'
 import { Route as EmployeesIndexRouteImport } from './routes/employees.index'
 import { Route as EmployeesEmployeeIdRouteImport } from './routes/employees.$employeeId'
 
@@ -60,6 +65,11 @@ const AttendanceRoute = AttendanceRouteImport.update({
 const AuditRoute = AuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompleteProfileRoute = CompleteProfileRouteImport.update({
+  id: '/complete-profile',
+  path: '/complete-profile',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DepartmentsRoute = DepartmentsRouteImport.update({
@@ -97,6 +107,11 @@ const HelpdeskRoute = HelpdeskRouteImport.update({
   path: '/helpdesk',
   getParentRoute: () => rootRouteImport,
 } as any)
+const KraRoute = KraRouteImport.update({
+  id: '/kra',
+  path: '/kra',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LeaveRoute = LeaveRouteImport.update({
   id: '/leave',
   path: '/leave',
@@ -122,6 +137,11 @@ const PerformanceRoute = PerformanceRouteImport.update({
   path: '/performance',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProfileStatusRoute = ProfileStatusRouteImport.update({
+  id: '/profile-status',
+  path: '/profile-status',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecruitmentRoute = RecruitmentRouteImport.update({
   id: '/recruitment',
   path: '/recruitment',
@@ -135,6 +155,11 @@ const ReportsRoute = ReportsRouteImport.update({
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RolesRoute = RolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -162,6 +187,11 @@ const UnauthorizedRoute = UnauthorizedRouteImport.update({
   path: '/unauthorized',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkRoute = WorkRouteImport.update({
+  id: '/work',
+  path: '/work',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EmployeesIndexRoute = EmployeesIndexRouteImport.update({
   id: '/employees/',
   path: '/employees/',
@@ -179,6 +209,7 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AssetsRoute
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -186,19 +217,23 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
+  '/profile-status': typeof ProfileStatusRoute
   '/recruitment': typeof RecruitmentRoute
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
   '/shifts': typeof ShiftsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/unauthorized': typeof UnauthorizedRoute
+  '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
   '/employees/': typeof EmployeesIndexRoute
 }
@@ -208,6 +243,7 @@ export interface FileRoutesByTo {
   '/assets': typeof AssetsRoute
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -215,19 +251,23 @@ export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
+  '/profile-status': typeof ProfileStatusRoute
   '/recruitment': typeof RecruitmentRoute
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
   '/shifts': typeof ShiftsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/unauthorized': typeof UnauthorizedRoute
+  '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
   '/employees': typeof EmployeesIndexRoute
 }
@@ -238,6 +278,7 @@ export interface FileRoutesById {
   '/assets': typeof AssetsRoute
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
+  '/complete-profile': typeof CompleteProfileRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -245,19 +286,23 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
+  '/profile-status': typeof ProfileStatusRoute
   '/recruitment': typeof RecruitmentRoute
   '/reports': typeof ReportsRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/roles': typeof RolesRoute
   '/settings': typeof SettingsRoute
   '/shifts': typeof ShiftsRoute
   '/sign-in': typeof SignInRoute
   '/sign-up': typeof SignUpRoute
   '/unauthorized': typeof UnauthorizedRoute
+  '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
   '/employees/': typeof EmployeesIndexRoute
 }
@@ -269,6 +314,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/attendance'
     | '/audit'
+    | '/complete-profile'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -276,19 +322,23 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/kra'
     | '/leave'
     | '/notifications'
     | '/onboarding'
     | '/payroll'
     | '/performance'
+    | '/profile-status'
     | '/recruitment'
     | '/reports'
     | '/reset-password'
+    | '/roles'
     | '/settings'
     | '/shifts'
     | '/sign-in'
     | '/sign-up'
     | '/unauthorized'
+    | '/work'
     | '/employees/$employeeId'
     | '/employees/'
   fileRoutesByTo: FileRoutesByTo
@@ -298,6 +348,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/attendance'
     | '/audit'
+    | '/complete-profile'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -305,19 +356,23 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/kra'
     | '/leave'
     | '/notifications'
     | '/onboarding'
     | '/payroll'
     | '/performance'
+    | '/profile-status'
     | '/recruitment'
     | '/reports'
     | '/reset-password'
+    | '/roles'
     | '/settings'
     | '/shifts'
     | '/sign-in'
     | '/sign-up'
     | '/unauthorized'
+    | '/work'
     | '/employees/$employeeId'
     | '/employees'
   id:
@@ -327,6 +382,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/attendance'
     | '/audit'
+    | '/complete-profile'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -334,19 +390,23 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/kra'
     | '/leave'
     | '/notifications'
     | '/onboarding'
     | '/payroll'
     | '/performance'
+    | '/profile-status'
     | '/recruitment'
     | '/reports'
     | '/reset-password'
+    | '/roles'
     | '/settings'
     | '/shifts'
     | '/sign-in'
     | '/sign-up'
     | '/unauthorized'
+    | '/work'
     | '/employees/$employeeId'
     | '/employees/'
   fileRoutesById: FileRoutesById
@@ -357,6 +417,7 @@ export interface RootRouteChildren {
   AssetsRoute: typeof AssetsRoute
   AttendanceRoute: typeof AttendanceRoute
   AuditRoute: typeof AuditRoute
+  CompleteProfileRoute: typeof CompleteProfileRoute
   DepartmentsRoute: typeof DepartmentsRoute
   DesignationsRoute: typeof DesignationsRoute
   DocumentsRoute: typeof DocumentsRoute
@@ -364,19 +425,23 @@ export interface RootRouteChildren {
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   GoalsRoute: typeof GoalsRoute
   HelpdeskRoute: typeof HelpdeskRoute
+  KraRoute: typeof KraRoute
   LeaveRoute: typeof LeaveRoute
   NotificationsRoute: typeof NotificationsRoute
   OnboardingRoute: typeof OnboardingRoute
   PayrollRoute: typeof PayrollRoute
   PerformanceRoute: typeof PerformanceRoute
+  ProfileStatusRoute: typeof ProfileStatusRoute
   RecruitmentRoute: typeof RecruitmentRoute
   ReportsRoute: typeof ReportsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  RolesRoute: typeof RolesRoute
   SettingsRoute: typeof SettingsRoute
   ShiftsRoute: typeof ShiftsRoute
   SignInRoute: typeof SignInRoute
   SignUpRoute: typeof SignUpRoute
   UnauthorizedRoute: typeof UnauthorizedRoute
+  WorkRoute: typeof WorkRoute
   EmployeesEmployeeIdRoute: typeof EmployeesEmployeeIdRoute
   EmployeesIndexRoute: typeof EmployeesIndexRoute
 }
@@ -416,6 +481,13 @@ declare module '@tanstack/react-router' {
       path: '/audit'
       fullPath: '/audit'
       preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/complete-profile': {
+      id: '/complete-profile'
+      path: '/complete-profile'
+      fullPath: '/complete-profile'
+      preLoaderRoute: typeof CompleteProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/departments': {
@@ -467,6 +539,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HelpdeskRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/kra': {
+      id: '/kra'
+      path: '/kra'
+      fullPath: '/kra'
+      preLoaderRoute: typeof KraRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/leave': {
       id: '/leave'
       path: '/leave'
@@ -502,6 +581,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PerformanceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile-status': {
+      id: '/profile-status'
+      path: '/profile-status'
+      fullPath: '/profile-status'
+      preLoaderRoute: typeof ProfileStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/recruitment': {
       id: '/recruitment'
       path: '/recruitment'
@@ -521,6 +607,13 @@ declare module '@tanstack/react-router' {
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/roles': {
+      id: '/roles'
+      path: '/roles'
+      fullPath: '/roles'
+      preLoaderRoute: typeof RolesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -558,6 +651,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UnauthorizedRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/work': {
+      id: '/work'
+      path: '/work'
+      fullPath: '/work'
+      preLoaderRoute: typeof WorkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/employees/': {
       id: '/employees/'
       path: '/employees'
@@ -581,6 +681,7 @@ const rootRouteChildren: RootRouteChildren = {
   AssetsRoute: AssetsRoute,
   AttendanceRoute: AttendanceRoute,
   AuditRoute: AuditRoute,
+  CompleteProfileRoute: CompleteProfileRoute,
   DepartmentsRoute: DepartmentsRoute,
   DesignationsRoute: DesignationsRoute,
   DocumentsRoute: DocumentsRoute,
@@ -588,19 +689,23 @@ const rootRouteChildren: RootRouteChildren = {
   ForgotPasswordRoute: ForgotPasswordRoute,
   GoalsRoute: GoalsRoute,
   HelpdeskRoute: HelpdeskRoute,
+  KraRoute: KraRoute,
   LeaveRoute: LeaveRoute,
   NotificationsRoute: NotificationsRoute,
   OnboardingRoute: OnboardingRoute,
   PayrollRoute: PayrollRoute,
   PerformanceRoute: PerformanceRoute,
+  ProfileStatusRoute: ProfileStatusRoute,
   RecruitmentRoute: RecruitmentRoute,
   ReportsRoute: ReportsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  RolesRoute: RolesRoute,
   SettingsRoute: SettingsRoute,
   ShiftsRoute: ShiftsRoute,
   SignInRoute: SignInRoute,
   SignUpRoute: SignUpRoute,
   UnauthorizedRoute: UnauthorizedRoute,
+  WorkRoute: WorkRoute,
   EmployeesEmployeeIdRoute: EmployeesEmployeeIdRoute,
   EmployeesIndexRoute: EmployeesIndexRoute,
 }

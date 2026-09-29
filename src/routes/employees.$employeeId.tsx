@@ -1,17 +1,28 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Mail, MapPin, Phone } from "lucide-react";
 import { toast } from "sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { requireAuth } from "@/lib/auth-guard";
-import { useSession } from "@/hooks/useSession";
+import { usePermissions } from "@/hooks/usePermissions";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EmptyState } from "@/components/common/States";
+import { AssetsTab } from "@/components/employees/AssetsTab";
+import { AttendanceTab } from "@/components/employees/AttendanceTab";
+import { ComplaintsTab } from "@/components/employees/ComplaintsTab";
+import { DocumentsTab } from "@/components/employees/DocumentsTab";
+import { EmploymentTab } from "@/components/employees/EmploymentTab";
+import { Field } from "@/components/employees/Field";
+import { LeaveTab } from "@/components/employees/LeaveTab";
+import { PerformanceTab } from "@/components/employees/PerformanceTab";
+import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
+import { MobileInput } from "@/components/common/MobileInput";
+import { PersonalTab } from "@/components/employees/PersonalTab";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+import { BLOOD_GROUPS, GENDERS, MARITAL_STATUSES, isIndianMobile } from "@/lib/onboarding-schema";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,7 +40,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { employeeService } from "@/services/employeeService";
 import { assetService } from "@/services/assetService";
 import { attendanceService } from "@/services/attendanceService";
@@ -38,17 +58,61 @@ import { talentService } from "@/services/talentService";
 import { workplaceService } from "@/services/workplaceService";
 import { complaintsService } from "@/services/complaintsService";
 import {
-  dayMonth,
+  indiaDateKey,
   indiaLocalDateTimeToUtcIso,
   indianTime,
   initialsOf,
-  inr,
-  percent,
   shortDate,
 } from "@/lib/format";
+import { queryKeys } from "@/lib/query-keys";
 import type { ComplaintPriority, ComplaintStatus } from "@/types";
 
-const COMPLAINT_STATUSES: ComplaintStatus[] = ["open", "in-progress", "resolved", "closed"];
+const selectClass = "h-10 w-full rounded-md border bg-background px-3 text-sm";
+
+function keptOrListed(value: string, original: string, allowed: readonly string[]) {
+  if (allowed.includes(value)) return value;
+  if (value === original) return undefined;
+  return value;
+}
+
+function keptOrMobile(value: string, original: string) {
+  const trimmed = value.trim();
+  if (!trimmed || isIndianMobile(trimmed)) return trimmed;
+  if (trimmed === original.trim()) return undefined;
+  return trimmed;
+}
+
+function ChoiceField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  const known = options.includes(value);
+  return (
+    <div className="space-y-1">
+      <Label>{label}</Label>
+      <select
+        className={selectClass}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Select</option>
+        {options.map((item) => (
+          <option key={item} value={item}>
+            {item}
+          </option>
+        ))}
+        {!known && value ? <option value={value}>{value}</option> : null}
+      </select>
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/employees/$employeeId")({
   beforeLoad: async ({ params }) => {
@@ -73,40 +137,37 @@ export const Route = createFileRoute("/employees/$employeeId")({
       { property: "og:title", content: "Employee profile · JeeVijay HRMS" },
       {
         property: "og:description",
-        content: "Personal, employment, attendance, asset and performance records for a single employee.",
+        content:
+          "Personal, employment, attendance, asset and performance records for a single employee.",
       },
     ],
   }),
   component: EmployeeDetailPage,
 });
 
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-1 truncate text-sm font-medium">{value}</p>
-    </div>
-  );
-}
-
 function EmployeeDetailPage() {
   const { employeeId } = Route.useParams();
   const { tab: initialTab } = Route.useSearch();
-  const { role, user } = useSession();
+  const { role, user, canManageTeam, isSuperAdmin, isHr } = usePermissions();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState(initialTab ?? "personal");
   const employee = useQuery({
-    queryKey: ["employee", employeeId],
+    queryKey: queryKeys.employees.detail(employeeId),
     queryFn: () => employeeService.getById(employeeId),
   });
   const emp = employee.data;
   const fullName = emp ? `${emp.firstName} ${emp.lastName}` : "";
-  const canManage = role === "admin" || role === "hr" || role === "manager";
+  const canManage = canManageTeam;
   const isOwnProfile = employeeId === (user.employeeId ?? user.id);
+  const canEditHrFields = isSuperAdmin || isHr;
+  const canEditProfile = canEditHrFields || isOwnProfile;
+  const canChangeEmploymentStatus = canEditHrFields && !isOwnProfile;
 
   const [editOpen, setEditOpen] = useState(false);
+  const [lifecycle, setLifecycle] = useState<
+    null | "suspend" | "terminate" | "activate" | "reinstate"
+  >(null);
+  const statusToast = useRef<string | null>(null);
   const [editForm, setEditForm] = useState({
     firstName: "",
     lastName: "",
@@ -138,18 +199,96 @@ function EmployeeDetailPage() {
     setEditOpen(true);
   };
   const updateEmployee = useMutation({
-    mutationFn: () => employeeService.update(employeeId, editForm),
+    mutationFn: () => {
+      if (!emp) throw new Error("Profile is still loading.");
+      const phone = keptOrMobile(editForm.phone, emp.phone);
+      const gender = keptOrListed(editForm.gender, emp.gender, GENDERS);
+      const bloodGroup = keptOrListed(editForm.bloodGroup, emp.bloodGroup, BLOOD_GROUPS);
+      const maritalStatus = keptOrListed(
+        editForm.maritalStatus,
+        emp.maritalStatus,
+        MARITAL_STATUSES,
+      );
+      const profile = {
+        firstName: editForm.firstName,
+        lastName: editForm.lastName,
+        dateOfBirth: editForm.dateOfBirth,
+        workLocation: editForm.workLocation,
+        ...(phone !== undefined ? { phone } : {}),
+        ...(gender !== undefined ? { gender } : {}),
+        ...(bloodGroup !== undefined ? { bloodGroup } : {}),
+        ...(maritalStatus !== undefined ? { maritalStatus } : {}),
+      };
+      return employeeService.update(
+        employeeId,
+        canChangeEmploymentStatus
+          ? {
+              ...profile,
+              employmentType: editForm.employmentType,
+              status: editForm.status,
+              exitDate: editForm.exitDate,
+            }
+          : {
+              ...profile,
+              ...(canEditHrFields ? { employmentType: editForm.employmentType } : {}),
+            },
+      );
+    },
     onSuccess: () => {
-      toast.success("Profile updated");
+      toast.success(statusToast.current ?? "Profile updated");
+      statusToast.current = null;
+      setLifecycle(null);
       setEditOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ["employee", employeeId] });
-      void queryClient.invalidateQueries({ queryKey: ["employees"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.employees.detail(employeeId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.employees.all });
     },
     onError: (e) =>
       toast.error("Could not update profile", {
         description: e instanceof Error ? e.message : "Supabase request failed.",
       }),
   });
+  const reinstateEmployee = useMutation({
+    mutationFn: () => employeeService.update(employeeId, { status: "active" }),
+    onSuccess: () => {
+      toast.success("Employee reinstated");
+      setLifecycle(null);
+      setEditOpen(false);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.employees.detail(employeeId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.employees.all });
+    },
+    onError: (e) =>
+      toast.error("Could not reinstate employee", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+  const beginProfileSave = () => {
+    if (!emp) return;
+    if (!canChangeEmploymentStatus) {
+      updateEmployee.mutate();
+      return;
+    }
+    if (editForm.status === "terminated" && !editForm.exitDate.trim()) {
+      toast.error("Terminated employees need an exit date.");
+      return;
+    }
+    if (editForm.status === "suspended" && editForm.status !== emp.status) {
+      setLifecycle("suspend");
+      return;
+    }
+    if (editForm.status === "terminated" && editForm.status !== emp.status) {
+      setLifecycle("terminate");
+      return;
+    }
+    if (editForm.status === "active" && emp.status === "terminated") {
+      setLifecycle("reinstate");
+      return;
+    }
+    if (editForm.status === "active" && emp.status === "suspended") {
+      setLifecycle("activate");
+      return;
+    }
+    updateEmployee.mutate();
+  };
 
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionForm, setCorrectionForm] = useState({
@@ -167,18 +306,33 @@ function EmployeeDetailPage() {
         attendanceId: correctionForm.attendanceId,
         reason: correctionForm.reason,
         ...(correctionForm.requestedCheckIn
-          ? { requestedCheckIn: indiaLocalDateTimeToUtcIso(targetDate, correctionForm.requestedCheckIn) }
+          ? {
+              requestedCheckIn: indiaLocalDateTimeToUtcIso(
+                targetDate,
+                correctionForm.requestedCheckIn,
+              ),
+            }
           : {}),
         ...(correctionForm.requestedCheckOut
-          ? { requestedCheckOut: indiaLocalDateTimeToUtcIso(targetDate, correctionForm.requestedCheckOut) }
+          ? {
+              requestedCheckOut: indiaLocalDateTimeToUtcIso(
+                targetDate,
+                correctionForm.requestedCheckOut,
+              ),
+            }
           : {}),
       });
     },
     onSuccess: () => {
       toast.success("Correction request submitted");
       setCorrectionOpen(false);
-      setCorrectionForm({ attendanceId: "", requestedCheckIn: "", requestedCheckOut: "", reason: "" });
-      void queryClient.invalidateQueries({ queryKey: ["corrections"] });
+      setCorrectionForm({
+        attendanceId: "",
+        requestedCheckIn: "",
+        requestedCheckOut: "",
+        reason: "",
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.corrections.all });
     },
     onError: (e) =>
       toast.error("Could not submit correction", {
@@ -187,37 +341,37 @@ function EmployeeDetailPage() {
   });
 
   const attendance = useQuery({
-    queryKey: ["attendance", employeeId],
+    queryKey: queryKeys.attendance.byEmployee(employeeId),
     queryFn: () => attendanceService.list({ employeeId }),
     enabled: Boolean(emp),
   });
   const leave = useQuery({
-    queryKey: ["leave", employeeId],
+    queryKey: queryKeys.leave.byEmployee(employeeId),
     queryFn: () => leaveService.list({ employeeId }),
     enabled: Boolean(emp),
   });
   const leaveBalance = useQuery({
-    queryKey: ["leave-balance", employeeId],
+    queryKey: queryKeys.leave.balance(employeeId),
     queryFn: () => leaveService.balance(employeeId),
     enabled: Boolean(emp),
   });
   const assets = useQuery({
-    queryKey: ["assets", employeeId],
+    queryKey: queryKeys.assets.byEmployee(employeeId),
     queryFn: () => assetService.assignedTo(employeeId),
     enabled: Boolean(emp),
   });
   const documents = useQuery({
-    queryKey: ["documents", employeeId],
+    queryKey: queryKeys.documents.byEmployee(employeeId),
     queryFn: () => workplaceService.documentsOf(employeeId),
     enabled: Boolean(emp),
   });
   const goals = useQuery({
-    queryKey: ["goals", employeeId],
+    queryKey: queryKeys.goals.byEmployee(employeeId),
     queryFn: () => talentService.goalsOf(employeeId),
     enabled: Boolean(emp),
   });
   const reviews = useQuery({
-    queryKey: ["reviews", employeeId],
+    queryKey: queryKeys.reviews.byEmployee(employeeId),
     queryFn: () => talentService.reviewsOf(employeeId),
     enabled: Boolean(emp),
   });
@@ -227,7 +381,7 @@ function EmployeeDetailPage() {
   // own profile, via the self-select policy, same as an employee.
   const canManageComplaints = role === "admin" || role === "hr";
   const complaints = useQuery({
-    queryKey: ["complaints", employeeId],
+    queryKey: queryKeys.complaints.byEmployee(employeeId),
     queryFn: () => complaintsService.listForEmployee(employeeId),
     enabled: Boolean(emp) && (isOwnProfile || canManageComplaints),
   });
@@ -245,7 +399,7 @@ function EmployeeDetailPage() {
       toast.success("Complaint submitted", { description: "HR and admin have been notified." });
       setComplaintOpen(false);
       setComplaintForm({ subject: "", category: "", description: "", priority: "medium" });
-      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.complaints.byEmployee(employeeId) });
     },
     onError: (e) =>
       toast.error("Could not submit complaint", {
@@ -258,7 +412,7 @@ function EmployeeDetailPage() {
       complaintsService.updateStatus(id, status),
     onSuccess: () => {
       toast.success("Complaint status updated");
-      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.complaints.byEmployee(employeeId) });
     },
     onError: (e) =>
       toast.error("Could not update status", {
@@ -271,7 +425,7 @@ function EmployeeDetailPage() {
       complaintsService.updateAssignee(id, assignedTo),
     onSuccess: () => {
       toast.success("Complaint assignment updated");
-      void queryClient.invalidateQueries({ queryKey: ["complaints", employeeId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.complaints.byEmployee(employeeId) });
     },
     onError: (e) =>
       toast.error("Could not update assignment", {
@@ -280,7 +434,7 @@ function EmployeeDetailPage() {
   });
 
   const assignableEmployees = useQuery({
-    queryKey: ["employees", "assignable"],
+    queryKey: queryKeys.employees.assignable,
     queryFn: () => employeeService.list(),
     enabled: canManageComplaints,
   });
@@ -293,9 +447,12 @@ function EmployeeDetailPage() {
     );
   }
 
+  const passwordForm = role === "employee" && isOwnProfile ? <ChangePasswordForm /> : null;
+
   if (!emp) {
     return (
       <AppLayout>
+        {passwordForm}
         <EmptyState
           title="Employee not found"
           description="This record may have been removed or the link is incorrect."
@@ -324,7 +481,12 @@ function EmployeeDetailPage() {
         actions={
           <>
             <StatusBadge status={emp.status} />
-            {canManage || isOwnProfile ? (
+            {canChangeEmploymentStatus && emp.status === "terminated" ? (
+              <Button variant="outline" onClick={() => setLifecycle("reinstate")}>
+                Reinstate
+              </Button>
+            ) : null}
+            {canEditProfile ? (
               <Button variant="outline" onClick={openEdit}>
                 Edit profile
               </Button>
@@ -360,6 +522,7 @@ function EmployeeDetailPage() {
             <Field label="Joined" value={shortDate(emp.joinedOn)} />
             <Field label="Blood group" value={emp.bloodGroup} />
             <Field label="Gender" value={emp.gender} />
+            <Field label="Exit date" value={emp.exitDate ? shortDate(emp.exitDate) : "—"} />
           </div>
         </SectionCard>
 
@@ -375,299 +538,36 @@ function EmployeeDetailPage() {
             <TabsTrigger value="complaints">Complaints</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="personal" className="mt-4">
-            <SectionCard title="Personal information" bodyClassName="grid gap-4 p-5 sm:grid-cols-2">
-              <Field label="Date of birth" value={shortDate(emp.dateOfBirth)} />
-              <Field label="Marital status" value={emp.maritalStatus} />
-              <Field label="Address" value={emp.address} />
-              <Field label="Emergency contact" value={`${emp.emergencyContact.name} (${emp.emergencyContact.relation})`} />
-              <Field label="Emergency phone" value={emp.emergencyContact.phone} />
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="employment" className="mt-4 space-y-4">
-            <SectionCard title="Employment" bodyClassName="grid gap-4 p-5 sm:grid-cols-2">
-              <Field label="Department" value={emp.department} />
-              <Field label="Designation" value={emp.designation} />
-              <Field label="Employment type" value={emp.employmentType} />
-              <Field label="Manager" value={emp.managerName ?? "—"} />
-              <Field label="Annual CTC" value={inr(emp.ctcAnnual)} />
-              <Field label="Access role" value={emp.role} />
-            </SectionCard>
-            <SectionCard title="Bank details" bodyClassName="grid gap-4 p-5 sm:grid-cols-2">
-              <Field label="Account name" value={emp.bank.accountName} />
-              <Field label="Bank" value={emp.bank.bankName} />
-              <Field label="Account number" value={emp.bank.accountNumber} />
-              <Field label="IFSC" value={emp.bank.ifsc} />
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="attendance" className="mt-4">
-            <SectionCard
-              title="Recent attendance"
-              bodyClassName="p-0"
-              action={
-                canManage || isOwnProfile ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!attendance.data?.length}
-                    onClick={() => {
-                      setCorrectionForm({
-                        attendanceId: attendance.data?.[0]?.id ?? "",
-                        requestedCheckIn: "",
-                        requestedCheckOut: "",
-                        reason: "",
-                      });
-                      setCorrectionOpen(true);
-                    }}
-                  >
-                    Request correction
-                  </Button>
-                ) : null
-              }
-            >
-              <ul className="divide-y divide-border">
-                {(attendance.data ?? []).map((record) => (
-                  <li key={record.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{shortDate(record.date)}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        In {indianTime(record.checkIn)} · Out {indianTime(record.checkOut)} ·{" "}
-                        {record.workedHours}h · {record.source}
-                      </p>
-                    </div>
-                    <StatusBadge status={record.status} />
-                  </li>
-                ))}
-                {attendance.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No attendance records yet.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="leave" className="mt-4 space-y-4">
-            <div className="grid gap-3 sm:grid-cols-4">
-              {(leaveBalance.data ?? []).map((entry) => (
-                <div key={entry.id} className="surface-card p-4">
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">{entry.name}</p>
-                  <p className="mt-1 font-display text-2xl font-bold">{entry.remaining}</p>
-                  <p className="text-xs text-muted-foreground">{entry.used} used of {entry.allocated}</p>
-                </div>
-              ))}
-            </div>
-            <SectionCard title="Leave history" bodyClassName="p-0">
-              <ul className="divide-y divide-border">
-                {(leave.data ?? []).map((request) => (
-                  <li key={request.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{request.type} leave</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {dayMonth(request.from)} – {dayMonth(request.to)} · {request.days}d ·{" "}
-                        {request.reason}
-                      </p>
-                    </div>
-                    <StatusBadge status={request.status} />
-                  </li>
-                ))}
-                {leave.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No leave history.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="assets" className="mt-4">
-            <SectionCard title="Assigned assets" bodyClassName="p-0">
-              <ul className="divide-y divide-border">
-                {(assets.data ?? []).map((asset) => (
-                  <li key={asset.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{asset.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {asset.tag} · {asset.serial} · issued {shortDate(asset.assignedOn)}
-                      </p>
-                    </div>
-                    <StatusBadge status={asset.status} />
-                  </li>
-                ))}
-                {assets.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No assets assigned.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="documents" className="mt-4">
-            <SectionCard title="Documents" bodyClassName="p-0">
-              <ul className="divide-y divide-border">
-                {(documents.data ?? []).map((doc) => (
-                  <li key={doc.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{doc.name}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {doc.category} · {doc.size} · uploaded {shortDate(doc.uploadedOn)}
-                      </p>
-                    </div>
-                    <StatusBadge status={doc.verified ? "verified" : "pending"} />
-                  </li>
-                ))}
-                {documents.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No documents on file.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="performance" className="mt-4 space-y-4">
-            <SectionCard title="Goals" bodyClassName="space-y-4 p-5">
-              {(goals.data ?? []).map((goal) => (
-                <div key={goal.id}>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium">{goal.title}</p>
-                    <StatusBadge status={goal.status} />
-                  </div>
-                  <Progress value={goal.progress} className="mt-2 h-2" />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {percent(goal.progress)} · weight {goal.weight}% · due {shortDate(goal.dueDate)}
-                  </p>
-                </div>
-              ))}
-              {goals.data?.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No goals for this cycle.</p>
-              ) : null}
-            </SectionCard>
-            <SectionCard title="Review cycles" bodyClassName="p-0">
-              <ul className="divide-y divide-border">
-                {(reviews.data ?? []).map((review) => (
-                  <li key={review.id} className="flex items-center gap-3 px-5 py-3.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold">{review.cycle}</p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        Reviewer {review.reviewer} · self {review.selfScore} · manager{" "}
-                        {review.managerScore}
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold">{review.finalRating}</span>
-                    <StatusBadge status={review.status} />
-                  </li>
-                ))}
-                {reviews.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No reviews recorded.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
-
-          <TabsContent value="complaints" className="mt-4">
-            <SectionCard
-              title="Complaints"
-              description={
-                canManageComplaints
-                  ? "Raised complaints for this employee, within your organization."
-                  : "Complaints you've raised and their current status."
-              }
-              bodyClassName="p-0"
-              action={
-                isOwnProfile ? (
-                  <Button size="sm" onClick={() => setComplaintOpen(true)}>
-                    Raise complaint
-                  </Button>
-                ) : undefined
-              }
-            >
-              <ul className="divide-y divide-border">
-                {(complaints.data ?? []).map((complaint) => (
-                  <li key={complaint.id} className="flex flex-col gap-3 px-5 py-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">{complaint.subject}</p>
-                        <p className="truncate text-xs text-muted-foreground">
-                          {complaint.category || "Uncategorized"} · {complaint.priority} priority · raised{" "}
-                          {shortDate(complaint.createdAt)}
-                        </p>
-                        {complaint.description ? (
-                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground/80">
-                            {complaint.description}
-                          </p>
-                        ) : null}
-                      </div>
-                      <StatusBadge status={complaint.status} />
-                    </div>
-                    {canManageComplaints ? (
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <Label className="text-xs text-muted-foreground">Status</Label>
-                          <Select
-                            value={complaint.status}
-                            onValueChange={(value) =>
-                              updateComplaintStatus.mutate({ id: complaint.id, status: value as ComplaintStatus })
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-[140px] text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {COMPLAINT_STATUSES.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {status}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Label className="text-xs text-muted-foreground">Assigned to</Label>
-                          <Select
-                            value={complaint.assignedTo ?? "unassigned"}
-                            onValueChange={(value) =>
-                              updateComplaintAssignee.mutate({
-                                id: complaint.id,
-                                assignedTo: value === "unassigned" ? null : value,
-                              })
-                            }
-                          >
-                            <SelectTrigger className="h-8 w-[180px] text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {(assignableEmployees.data ?? []).map((e) => (
-                                <SelectItem key={e.id} value={e.id}>
-                                  {e.firstName} {e.lastName}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    ) : null}
-                  </li>
-                ))}
-                {complaints.data?.length === 0 ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    No complaints raised.
-                  </li>
-                ) : null}
-                {!isOwnProfile && !canManageComplaints ? (
-                  <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                    You don't have access to manage complaints.
-                  </li>
-                ) : null}
-              </ul>
-            </SectionCard>
-          </TabsContent>
+          <PersonalTab employee={emp} footer={passwordForm} />
+          <EmploymentTab employee={emp} />
+          <AttendanceTab
+            records={attendance.data}
+            canRequestCorrection={canManage || isOwnProfile}
+            onRequestCorrection={() => {
+              setCorrectionForm({
+                attendanceId: attendance.data?.[0]?.id ?? "",
+                requestedCheckIn: "",
+                requestedCheckOut: "",
+                reason: "",
+              });
+              setCorrectionOpen(true);
+            }}
+          />
+          <LeaveTab balance={leaveBalance.data} requests={leave.data} />
+          <AssetsTab assets={assets.data} />
+          <DocumentsTab documents={documents.data} />
+          <PerformanceTab employeeId={employeeId} goals={goals.data} reviews={reviews.data} />
+          <ComplaintsTab
+            complaints={complaints.data}
+            canManageComplaints={canManageComplaints}
+            isOwnProfile={isOwnProfile}
+            assignees={assignableEmployees.data}
+            onRaise={() => setComplaintOpen(true)}
+            onStatusChange={(id, status) => updateComplaintStatus.mutate({ id, status })}
+            onAssigneeChange={(id, assignedTo) =>
+              updateComplaintAssignee.mutate({ id, assignedTo })
+            }
+          />
         </Tabs>
       </div>
 
@@ -681,12 +581,6 @@ function EmployeeDetailPage() {
               [
                 ["firstName", "First name", "text"],
                 ["lastName", "Last name", "text"],
-                ["phone", "Phone", "text"],
-                ["gender", "Gender", "text"],
-                ["dateOfBirth", "Date of birth", "date"],
-                ["bloodGroup", "Blood group", "text"],
-                ["maritalStatus", "Marital status", "text"],
-                ["workLocation", "Location", "text"],
               ] as const
             ).map(([key, label, type]) => (
               <div key={key} className="space-y-1">
@@ -698,14 +592,56 @@ function EmployeeDetailPage() {
                 />
               </div>
             ))}
-            {canManage ? (
+            <div className="space-y-1">
+              <Label>Phone</Label>
+              <MobileInput
+                value={editForm.phone}
+                onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
+              />
+            </div>
+            <ChoiceField
+              label="Gender"
+              value={editForm.gender}
+              options={GENDERS}
+              onChange={(gender) => setEditForm({ ...editForm, gender })}
+            />
+            <div className="space-y-1">
+              <Label>Date of birth</Label>
+              <Input
+                type="date"
+                value={editForm.dateOfBirth}
+                onChange={(event) => setEditForm({ ...editForm, dateOfBirth: event.target.value })}
+              />
+            </div>
+            <ChoiceField
+              label="Blood group"
+              value={editForm.bloodGroup}
+              options={BLOOD_GROUPS}
+              onChange={(bloodGroup) => setEditForm({ ...editForm, bloodGroup })}
+            />
+            <ChoiceField
+              label="Marital status"
+              value={editForm.maritalStatus}
+              options={MARITAL_STATUSES}
+              onChange={(maritalStatus) => setEditForm({ ...editForm, maritalStatus })}
+            />
+            <div className="space-y-1">
+              <Label>Location</Label>
+              <Input
+                value={editForm.workLocation}
+                onChange={(event) => setEditForm({ ...editForm, workLocation: event.target.value })}
+              />
+            </div>
+            {canEditHrFields ? (
               <>
                 <div className="space-y-1">
                   <Label>Employment type</Label>
                   <select
                     className="h-10 w-full rounded-md border bg-background px-3 text-sm"
                     value={editForm.employmentType}
-                    onChange={(event) => setEditForm({ ...editForm, employmentType: event.target.value })}
+                    onChange={(event) =>
+                      setEditForm({ ...editForm, employmentType: event.target.value })
+                    }
                   >
                     <option value="full-time">Full-time</option>
                     <option value="part-time">Part-time</option>
@@ -713,37 +649,89 @@ function EmployeeDetailPage() {
                     <option value="intern">Intern</option>
                   </select>
                 </div>
-                <div className="space-y-1">
-                  <Label>Status</Label>
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={editForm.status}
-                    onChange={(event) => setEditForm({ ...editForm, status: event.target.value })}
-                  >
-                    <option value="active">Active</option>
-                    <option value="probation">Probation</option>
-                    <option value="notice">Notice period</option>
-                    <option value="on-leave">On leave</option>
-                    <option value="resigned">Resigned</option>
-                  </select>
-                </div>
-                {editForm.status === "resigned" ? (
-                  <div className="space-y-1">
-                    <Label>Exit date</Label>
-                    <Input
-                      type="date"
-                      value={editForm.exitDate}
-                      onChange={(event) => setEditForm({ ...editForm, exitDate: event.target.value })}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Used for Joiners vs exits and attrition reporting on the Dashboard.
-                    </p>
-                  </div>
-                ) : null}
+                {canChangeEmploymentStatus ? (
+                  <>
+                    <div className="space-y-1">
+                      <Label>Status</Label>
+                      <select
+                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                        value={editForm.status}
+                        onChange={(event) => {
+                          const status = event.target.value;
+                          const needsExitDate =
+                            status === "resigned" ||
+                            status === "suspended" ||
+                            status === "terminated";
+                          setEditForm({
+                            ...editForm,
+                            status,
+                            exitDate:
+                              needsExitDate && !editForm.exitDate
+                                ? indiaDateKey()
+                                : editForm.exitDate,
+                          });
+                        }}
+                      >
+                        {emp.status === "terminated" ? null : (
+                          <option value="active">Active</option>
+                        )}
+                        <option value="probation">Probation</option>
+                        <option value="notice">Notice period</option>
+                        <option value="on-leave">On leave</option>
+                        <option value="resigned">Resigned</option>
+                        <option value="suspended">Suspended</option>
+                        <option value="terminated">Terminated</option>
+                        {[
+                          "active",
+                          "probation",
+                          "notice",
+                          "on-leave",
+                          "resigned",
+                          "suspended",
+                          "terminated",
+                        ].includes(editForm.status) ? null : (
+                          <option value={editForm.status}>{editForm.status}</option>
+                        )}
+                      </select>
+                    </div>
+                    {emp.status === "terminated" ? (
+                      <p className="text-xs text-muted-foreground sm:col-span-2">
+                        Active is not listed for a terminated employee. Use Reinstate to set them
+                        back to active. That keeps the exit date.
+                      </p>
+                    ) : null}
+                    {editForm.status === "resigned" ||
+                    editForm.status === "suspended" ||
+                    editForm.status === "terminated" ? (
+                      <div className="space-y-1">
+                        <Label>Exit date</Label>
+                        <Input
+                          type="date"
+                          required={editForm.status === "terminated"}
+                          value={editForm.exitDate}
+                          onChange={(event) =>
+                            setEditForm({ ...editForm, exitDate: event.target.value })
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {editForm.status === "terminated"
+                            ? "Required. Terminated employees cannot sign in, and the record is kept."
+                            : editForm.status === "suspended"
+                              ? "Filled with today in India time when empty. Setting them back to active clears it."
+                              : "Used for Joiners vs exits and attrition reporting on the Dashboard."}
+                        </p>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    Another administrator or HR must change your employment status.
+                  </p>
+                )}
               </>
             ) : null}
           </div>
-          {!canManage ? (
+          {!canEditHrFields ? (
             <p className="text-xs text-muted-foreground">
               Employment type and status are managed by HR/Admin.
             </p>
@@ -752,12 +740,84 @@ function EmployeeDetailPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={() => updateEmployee.mutate()} disabled={updateEmployee.isPending}>
+            <Button onClick={beginProfileSave} disabled={updateEmployee.isPending}>
               {updateEmployee.isPending ? "Saving…" : "Save changes"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={lifecycle !== null}
+        onOpenChange={(open) => {
+          if (!open && !updateEmployee.isPending && !reinstateEmployee.isPending)
+            setLifecycle(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {lifecycle === "suspend"
+                ? `Suspend ${fullName}?`
+                : lifecycle === "terminate"
+                  ? `Terminate ${fullName}?`
+                  : lifecycle === "reinstate"
+                    ? `Reinstate ${fullName}?`
+                    : lifecycle === "activate"
+                      ? `Set ${fullName} back to active?`
+                      : "Update employment status?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {lifecycle === "suspend"
+                ? "Suspended employees cannot sign in. This does not delete their record. An exit date is saved when one is not already set."
+                : lifecycle === "terminate"
+                  ? "Terminated employees cannot sign in. This does not delete their record. An exit date is required."
+                  : lifecycle === "reinstate"
+                    ? "They can sign in again. The recorded exit date stays on the file."
+                    : lifecycle === "activate"
+                      ? "They can sign in again. The exit date recorded while they were suspended will be cleared."
+                      : "Confirm this employment status change."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={updateEmployee.isPending || reinstateEmployee.isPending}>
+              Cancel
+            </AlertDialogCancel>
+            <Button
+              variant={
+                lifecycle === "reinstate" || lifecycle === "activate" ? "default" : "destructive"
+              }
+              disabled={
+                updateEmployee.isPending ||
+                reinstateEmployee.isPending ||
+                (lifecycle === "terminate" && !editForm.exitDate.trim())
+              }
+              onClick={() => {
+                statusToast.current =
+                  lifecycle === "suspend"
+                    ? "Employee suspended"
+                    : lifecycle === "terminate"
+                      ? "Employee terminated"
+                      : lifecycle === "activate"
+                        ? "Employee set back to active"
+                        : null;
+                if (lifecycle === "reinstate") reinstateEmployee.mutate();
+                else updateEmployee.mutate();
+              }}
+            >
+              {updateEmployee.isPending || reinstateEmployee.isPending
+                ? "Saving…"
+                : lifecycle === "suspend"
+                  ? "Suspend"
+                  : lifecycle === "terminate"
+                    ? "Terminate"
+                    : lifecycle === "reinstate"
+                      ? "Reinstate"
+                      : "Set active"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
         <DialogContent>
@@ -776,7 +836,8 @@ function EmployeeDetailPage() {
               >
                 {(attendance.data ?? []).map((record) => (
                   <option key={record.id} value={record.id}>
-                    {shortDate(record.date)} · in {indianTime(record.checkIn)} · out {indianTime(record.checkOut)}
+                    {shortDate(record.date)} · in {indianTime(record.checkIn)} · out{" "}
+                    {indianTime(record.checkOut)}
                   </option>
                 ))}
               </select>
@@ -808,7 +869,9 @@ function EmployeeDetailPage() {
               <Textarea
                 value={correctionForm.reason}
                 placeholder="Explain what needs correcting"
-                onChange={(event) => setCorrectionForm({ ...correctionForm, reason: event.target.value })}
+                onChange={(event) =>
+                  setCorrectionForm({ ...correctionForm, reason: event.target.value })
+                }
               />
             </div>
           </div>
@@ -841,7 +904,9 @@ function EmployeeDetailPage() {
               <Label>Subject</Label>
               <Input
                 value={complaintForm.subject}
-                onChange={(event) => setComplaintForm({ ...complaintForm, subject: event.target.value })}
+                onChange={(event) =>
+                  setComplaintForm({ ...complaintForm, subject: event.target.value })
+                }
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -850,7 +915,9 @@ function EmployeeDetailPage() {
                 <Input
                   placeholder="e.g. Workplace, Payroll, Harassment"
                   value={complaintForm.category}
-                  onChange={(event) => setComplaintForm({ ...complaintForm, category: event.target.value })}
+                  onChange={(event) =>
+                    setComplaintForm({ ...complaintForm, category: event.target.value })
+                  }
                 />
               </div>
               <div className="space-y-1">
@@ -878,7 +945,9 @@ function EmployeeDetailPage() {
               <Textarea
                 value={complaintForm.description}
                 placeholder="Describe the issue in detail"
-                onChange={(event) => setComplaintForm({ ...complaintForm, description: event.target.value })}
+                onChange={(event) =>
+                  setComplaintForm({ ...complaintForm, description: event.target.value })
+                }
               />
             </div>
           </div>
@@ -888,7 +957,11 @@ function EmployeeDetailPage() {
             </Button>
             <Button
               onClick={() => raiseComplaint.mutate()}
-              disabled={raiseComplaint.isPending || !complaintForm.subject.trim() || !complaintForm.description.trim()}
+              disabled={
+                raiseComplaint.isPending ||
+                !complaintForm.subject.trim() ||
+                !complaintForm.description.trim()
+              }
             >
               {raiseComplaint.isPending ? "Submitting…" : "Submit"}
             </Button>

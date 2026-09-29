@@ -10,12 +10,20 @@ import { SectionCard } from "@/components/common/SectionCard";
 import { FilterBar } from "@/components/common/FilterBar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { CardsSkeleton } from "@/components/common/States";
+import { MobileInput } from "@/components/common/MobileInput";
 import { Button } from "@/components/ui/button";
+import { emailHasDomain, isIndianMobile } from "@/lib/onboarding-schema";
 import { talentService } from "@/services/talentService";
 import { shortDate } from "@/lib/format";
 import type { Candidate } from "@/types";
 import { employeeService } from "@/services/employeeService";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
@@ -40,22 +48,63 @@ export const Route = createFileRoute("/recruitment")({
   component: RecruitmentPage,
 });
 
-const STAGES: Candidate["stage"][] = ["applied", "screening", "interview", "offer", "hired", "rejected"];
+const STAGES: Candidate["stage"][] = [
+  "applied",
+  "screening",
+  "interview",
+  "offer",
+  "hired",
+  "rejected",
+];
 
 function RecruitmentPage() {
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
   const [reqStatus, setReqStatus] = useState("open");
-  const [open, setOpen] = useState(false); const [form, setForm] = useState({ title: "", departmentId: "", location: "", openings: "1" }); const queryClient = useQueryClient();
-  const departments = useQuery({ queryKey: ["departments"], queryFn: () => employeeService.departments() });
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ title: "", departmentId: "", location: "", openings: "1" });
+  const queryClient = useQueryClient();
+  const departments = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => employeeService.departments(),
+  });
 
-  const openings = useQuery({ queryKey: ["openings", reqStatus], queryFn: () => talentService.openings({ status: reqStatus }) });
-  const allOpenings = useQuery({ queryKey: ["openings", "all"], queryFn: () => talentService.openings({ status: "all" }) });
+  const openings = useQuery({
+    queryKey: ["openings", reqStatus],
+    queryFn: () => talentService.openings({ status: reqStatus }),
+  });
+  const allOpenings = useQuery({
+    queryKey: ["openings", "all"],
+    queryFn: () => talentService.openings({ status: "all" }),
+  });
   const candidates = useQuery({
     queryKey: ["candidates", search, stage],
     queryFn: () => talentService.candidates({ search, status: stage }),
   });
-  const create = useMutation({ mutationFn: () => { if (!form.title.trim()) throw new Error("Title is required."); const input = { title: form.title, location: form.location, openings: Math.max(1, Number(form.openings) || 1), employmentType: "full-time" }; return talentService.createOpening(form.departmentId ? { ...input, departmentId: form.departmentId } : input); }, onSuccess: () => { toast.success("Requisition created"); setOpen(false); setForm({ title: "", departmentId: "", location: "", openings: "1" }); void queryClient.invalidateQueries({ queryKey: ["openings"] }); }, onError: (e) => toast.error("Could not create requisition", { description: e instanceof Error ? e.message : "Supabase request failed." }) });
+  const create = useMutation({
+    mutationFn: () => {
+      if (!form.title.trim()) throw new Error("Title is required.");
+      const input = {
+        title: form.title,
+        location: form.location,
+        openings: Math.max(1, Number(form.openings) || 1),
+        employmentType: "full-time",
+      };
+      return talentService.createOpening(
+        form.departmentId ? { ...input, departmentId: form.departmentId } : input,
+      );
+    },
+    onSuccess: () => {
+      toast.success("Requisition created");
+      setOpen(false);
+      setForm({ title: "", departmentId: "", location: "", openings: "1" });
+      void queryClient.invalidateQueries({ queryKey: ["openings"] });
+    },
+    onError: (e) =>
+      toast.error("Could not create requisition", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
 
   const closeRequisition = useMutation({
     mutationFn: (id: string) => talentService.closeOpening(id),
@@ -63,22 +112,37 @@ function RecruitmentPage() {
       toast.success("Requisition closed");
       void queryClient.invalidateQueries({ queryKey: ["openings"] });
     },
-    onError: (e) => toast.error("Could not close requisition", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not close requisition", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const [addCandidateJobId, setAddCandidateJobId] = useState<string | null>(null);
-  const [candidateForm, setCandidateForm] = useState({ name: "", email: "", phone: "", source: "", experienceYears: "" });
+  const [candidateForm, setCandidateForm] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    source: "",
+    experienceYears: "",
+  });
   const addCandidate = useMutation({
     mutationFn: () => {
       if (!addCandidateJobId) throw new Error("No requisition selected.");
       if (!candidateForm.name.trim()) throw new Error("Candidate name is required.");
+      const email = candidateForm.email.trim();
+      const phone = candidateForm.phone.trim();
+      if (email && !emailHasDomain(email)) throw new Error("Enter a valid email.");
+      if (!isIndianMobile(phone)) throw new Error("Enter a 10-digit mobile number.");
       return talentService.addCandidateApplication({
         jobId: addCandidateJobId,
         name: candidateForm.name,
-        email: candidateForm.email,
-        phone: candidateForm.phone,
+        email,
+        phone,
         source: candidateForm.source,
-        ...(candidateForm.experienceYears ? { experienceYears: Number(candidateForm.experienceYears) } : {}),
+        ...(candidateForm.experienceYears
+          ? { experienceYears: Number(candidateForm.experienceYears) }
+          : {}),
       });
     },
     onSuccess: () => {
@@ -88,7 +152,10 @@ function RecruitmentPage() {
       void queryClient.invalidateQueries({ queryKey: ["candidates"] });
       void queryClient.invalidateQueries({ queryKey: ["openings"] });
     },
-    onError: (e) => toast.error("Could not add candidate", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not add candidate", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const moveStage = useMutation({
@@ -97,7 +164,10 @@ function RecruitmentPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["candidates"] });
     },
-    onError: (e) => toast.error("Could not update candidate stage", { description: e instanceof Error ? e.message : "Try again." }),
+    onError: (e) =>
+      toast.error("Could not update candidate stage", {
+        description: e instanceof Error ? e.message : "Try again.",
+      }),
   });
 
   const rows = candidates.data ?? [];
@@ -177,7 +247,10 @@ function RecruitmentPage() {
         ) : (
           <ul className="divide-y divide-border">
             {(openings.data ?? []).map((job) => (
-              <li key={job.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4">
+              <li
+                key={job.id}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4"
+              >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">{job.title}</p>
                   <p className="truncate text-xs text-muted-foreground">
@@ -190,7 +263,11 @@ function RecruitmentPage() {
                   <StatusBadge status={job.stage} />
                   {job.stage === "open" ? (
                     <>
-                      <Button size="sm" variant="outline" onClick={() => setAddCandidateJobId(job.id)}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setAddCandidateJobId(job.id)}
+                      >
                         Add candidate
                       </Button>
                       <Button
@@ -214,9 +291,69 @@ function RecruitmentPage() {
           </ul>
         )}
       </SectionCard>
-      <Dialog open={open} onOpenChange={setOpen}><DialogContent><DialogHeader><DialogTitle>New requisition</DialogTitle></DialogHeader><div className="grid gap-3"><div><Label>Title</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div><div><Label>Department</Label><select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={form.departmentId} onChange={(e) => setForm({ ...form, departmentId: e.target.value })}><option value="">Unassigned</option>{(departments.data ?? []).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</select></div><div className="grid grid-cols-2 gap-3"><div><Label>Location</Label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></div><div><Label>Openings</Label><Input type="number" min="1" value={form.openings} onChange={(e) => setForm({ ...form, openings: e.target.value })} /></div></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={() => create.mutate()} disabled={create.isPending}>{create.isPending ? "Saving…" : "Create requisition"}</Button></DialogFooter></DialogContent></Dialog>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New requisition</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label>Title</Label>
+              <Input
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>Department</Label>
+              <select
+                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
+                value={form.departmentId}
+                onChange={(e) => setForm({ ...form, departmentId: e.target.value })}
+              >
+                <option value="">Unassigned</option>
+                {(departments.data ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Location</Label>
+                <Input
+                  value={form.location}
+                  onChange={(e) => setForm({ ...form, location: e.target.value })}
+                />
+              </div>
+              <div>
+                <Label>Openings</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={form.openings}
+                  onChange={(e) => setForm({ ...form, openings: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => create.mutate()} disabled={create.isPending}>
+              {create.isPending ? "Saving…" : "Create requisition"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <SectionCard title="Candidate pipeline" description="Drag-free kanban view by stage" bodyClassName="space-y-4 p-5">
+      <SectionCard
+        title="Candidate pipeline"
+        description="Drag-free kanban view by stage"
+        bodyClassName="space-y-4 p-5"
+      >
         <FilterBar
           search={search}
           onSearchChange={setSearch}
@@ -238,7 +375,10 @@ function RecruitmentPage() {
           {STAGES.map((column) => {
             const items = rows.filter((c) => c.stage === column);
             return (
-              <div key={column} className="min-w-[200px] rounded-2xl border border-border bg-surface-2/40 p-3">
+              <div
+                key={column}
+                className="min-w-50 rounded-2xl border border-border bg-surface-2/40 p-3"
+              >
                 <div className="mb-3 flex items-center justify-between">
                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
                     {column}
@@ -247,7 +387,10 @@ function RecruitmentPage() {
                 </div>
                 <div className="space-y-2">
                   {items.map((candidate) => (
-                    <article key={candidate.id} className="rounded-xl border border-border bg-card p-3">
+                    <article
+                      key={candidate.id}
+                      className="rounded-xl border border-border bg-card p-3"
+                    >
                       <p className="truncate text-sm font-semibold">{candidate.name}</p>
                       <p className="truncate text-xs text-muted-foreground">{candidate.role}</p>
                       <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
@@ -299,7 +442,10 @@ function RecruitmentPage() {
         </div>
       </SectionCard>
 
-      <Dialog open={addCandidateJobId !== null} onOpenChange={(v) => !v && setAddCandidateJobId(null)}>
+      <Dialog
+        open={addCandidateJobId !== null}
+        onOpenChange={(v) => !v && setAddCandidateJobId(null)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add candidate</DialogTitle>
@@ -307,26 +453,47 @@ function RecruitmentPage() {
           <div className="grid gap-3">
             <div>
               <Label>Name</Label>
-              <Input value={candidateForm.name} onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })} />
+              <Input
+                value={candidateForm.name}
+                onChange={(e) => setCandidateForm({ ...candidateForm, name: e.target.value })}
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Email</Label>
-                <Input type="email" value={candidateForm.email} onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })} />
+                <Input
+                  type="email"
+                  value={candidateForm.email}
+                  onChange={(e) => setCandidateForm({ ...candidateForm, email: e.target.value })}
+                />
               </div>
               <div>
                 <Label>Phone</Label>
-                <Input value={candidateForm.phone} onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })} />
+                <MobileInput
+                  value={candidateForm.phone}
+                  onChange={(e) => setCandidateForm({ ...candidateForm, phone: e.target.value })}
+                />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Source</Label>
-                <Input placeholder="Referral, LinkedIn, …" value={candidateForm.source} onChange={(e) => setCandidateForm({ ...candidateForm, source: e.target.value })} />
+                <Input
+                  placeholder="Referral, LinkedIn, …"
+                  value={candidateForm.source}
+                  onChange={(e) => setCandidateForm({ ...candidateForm, source: e.target.value })}
+                />
               </div>
               <div>
                 <Label>Experience (yrs)</Label>
-                <Input type="number" min="0" value={candidateForm.experienceYears} onChange={(e) => setCandidateForm({ ...candidateForm, experienceYears: e.target.value })} />
+                <Input
+                  type="number"
+                  min="0"
+                  value={candidateForm.experienceYears}
+                  onChange={(e) =>
+                    setCandidateForm({ ...candidateForm, experienceYears: e.target.value })
+                  }
+                />
               </div>
             </div>
           </div>

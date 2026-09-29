@@ -3,7 +3,11 @@ export const PASSWORD_REQUIREMENTS = [
   { key: "upper", label: "Uppercase letter", test: (value: string) => /[A-Z]/.test(value) },
   { key: "lower", label: "Lowercase letter", test: (value: string) => /[a-z]/.test(value) },
   { key: "number", label: "Number", test: (value: string) => /\d/.test(value) },
-  { key: "special", label: "Special character", test: (value: string) => /[^A-Za-z0-9]/.test(value) },
+  {
+    key: "special",
+    label: "Special character",
+    test: (value: string) => /[^A-Za-z0-9]/.test(value),
+  },
 ] as const;
 
 export function passwordChecks(value: string) {
