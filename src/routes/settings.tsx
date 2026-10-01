@@ -15,6 +15,7 @@ import { requireAuthForPath } from "@/lib/auth-guard";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { settingsService } from "@/services/settingsService";
+import { BetaTab } from "@/components/settings/BetaTab";
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: () => requireAuthForPath("/settings"),
@@ -81,6 +82,7 @@ function SettingsPage() {
           <TabsTrigger value="organisation">Organisation</TabsTrigger>
           <TabsTrigger value="access">Access</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
+          {role === "admin" && <TabsTrigger value="beta">Beta</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="organisation">
@@ -187,6 +189,12 @@ function SettingsPage() {
             </Button>
           </SectionCard>
         </TabsContent>
+
+        {role === "admin" && (
+          <TabsContent value="beta">
+            <BetaTab />
+          </TabsContent>
+        )}
       </Tabs>
     </AppLayout>
   );

@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor, SafeHtml } from "@/components/rich-text";
 import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { shiftBounds, submitPhase, type SubmitPhase } from "@/lib/dwr-window";
@@ -58,6 +59,7 @@ const reportSchema = z
     reportDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a date."),
     blockers: z.string().max(2000),
     planForTomorrow: z.string().max(2000),
+    summaryHtml: z.string().max(20000),
     linkTasks: z.boolean(),
     items: z
       .array(
@@ -70,6 +72,7 @@ const reportSchema = z
             .min(0, "Hours cannot be negative.")
             .max(24, "Hours cannot exceed 24."),
           itemStatus: z.enum(itemStatuses),
+          isUnplanned: z.boolean(),
         }),
       )
       .min(1, "Add at least one line."),
@@ -77,10 +80,10 @@ const reportSchema = z
   .superRefine((value, ctx) => {
     if (!value.linkTasks) return;
     value.items.forEach((item, index) => {
-      if (!item.taskId) {
+      if (!item.taskId && !item.isUnplanned) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: "Choose an assigned task. Free text is only for days with no tasks.",
+          message: "Choose an assigned task, or mark the line as unplanned work.",
           path: ["items", index, "taskId"],
         });
       }
@@ -136,7 +139,7 @@ function messageOf(error: unknown) {
 }
 
 function emptyItem(): ReportFormValues["items"][number] {
-  return { taskId: "", description: "", hours: 1, itemStatus: "done" };
+  return { taskId: "", description: "", hours: 1, itemStatus: "done", isUnplanned: false };
 }
 
 function phaseCopy(phase: SubmitPhase, opensAt: Date, closesAt: Date) {
@@ -531,6 +534,7 @@ function ReportsPanel() {
       reportDate: today,
       blockers: "",
       planForTomorrow: "",
+      summaryHtml: "",
       linkTasks: false,
       items: [emptyItem()],
     },
@@ -569,6 +573,7 @@ function ReportsPanel() {
         reportDate: saved.reportDate,
         blockers: saved.blockers,
         planForTomorrow: saved.planForTomorrow,
+        summaryHtml: saved.summaryHtml,
         linkTasks: openTasks.length > 0,
         items: saved.items.length
           ? saved.items.map((item) => ({
@@ -576,6 +581,7 @@ function ReportsPanel() {
               description: item.description,
               hours: item.hours,
               itemStatus: item.itemStatus,
+              isUnplanned: item.isUnplanned,
             }))
           : [emptyItem()],
       });
@@ -585,6 +591,7 @@ function ReportsPanel() {
       reportDate,
       blockers: "",
       planForTomorrow: "",
+      summaryHtml: "",
       linkTasks: openTasks.length > 0,
       items: [emptyItem()],
     });
@@ -662,6 +669,7 @@ function ReportsPanel() {
                     description: task.title,
                     hours: task.estimatedHours && task.estimatedHours > 0 ? task.estimatedHours : 1,
                     itemStatus: task.status,
+                    isUnplanned: false,
                   })),
                 );
               }}
@@ -670,7 +678,8 @@ function ReportsPanel() {
             </Button>
           ) : (
             <p className="text-sm text-muted-foreground">
-              No tasks are assigned, so you can write free-text lines.
+              No tasks are assigned, so you can write free-text lines. With tasks assigned, extra
+              work can be added as unplanned lines (up to 3).
             </p>
           )}
           <div className="space-y-3">
@@ -705,6 +714,21 @@ function ReportsPanel() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {!form.watch(`items.${index}.taskId`) ? (
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          disabled={locked}
+                          checked={form.watch(`items.${index}.isUnplanned`)}
+                          onChange={(event) =>
+                            form.setValue(`items.${index}.isUnplanned`, event.target.checked, {
+                              shouldValidate: true,
+                            })
+                          }
+                        />
+                        Unplanned work (not linked to a task)
+                      </label>
+                    ) : null}
                     {form.formState.errors.items?.[index]?.taskId ? (
                       <p className="text-xs text-destructive">
                         {form.formState.errors.items[index]?.taskId?.message}
@@ -783,6 +807,15 @@ function ReportsPanel() {
           {form.formState.errors.items?.message ? (
             <p className="text-sm text-destructive">{form.formState.errors.items.message}</p>
           ) : null}
+          <div className="grid gap-1.5">
+            <Label>Day summary (optional)</Label>
+            <RichTextEditor
+              value={form.watch("summaryHtml")}
+              onChange={(html) => form.setValue("summaryHtml", html, { shouldDirty: true })}
+              disabled={locked}
+              placeholder="Summary of the day"
+            />
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label>Blockers</Label>
@@ -847,11 +880,13 @@ function toPayload(values: ReportFormValues) {
     reportDate: values.reportDate,
     blockers: values.blockers,
     planForTomorrow: values.planForTomorrow,
+    summaryHtml: values.summaryHtml,
     items: values.items.map((item) => ({
       taskId: item.taskId || null,
       description: item.description,
       hours: Number(item.hours),
       itemStatus: item.itemStatus,
+      isUnplanned: item.isUnplanned && !item.taskId,
     })),
   };
 }
@@ -1177,6 +1212,7 @@ function ReviewDialog({
               {item.description} · {item.hours}h · {item.itemStatus}
             </p>
           ))}
+          {report?.summaryHtml ? <SafeHtml html={report.summaryHtml} /> : null}
           {report?.blockers ? <p>Blockers: {report.blockers}</p> : null}
           {report?.planForTomorrow ? <p>Tomorrow: {report.planForTomorrow}</p> : null}
         </div>

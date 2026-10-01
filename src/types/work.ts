@@ -52,6 +52,7 @@ export interface DwrItem {
   description: string;
   hours: number;
   itemStatus: DwrItemStatus;
+  isUnplanned: boolean;
 }
 
 export interface DwrItemInput {
@@ -59,6 +60,7 @@ export interface DwrItemInput {
   description: string;
   hours: number;
   itemStatus: DwrItemStatus;
+  isUnplanned: boolean;
 }
 
 export interface DailyWorkReport {
@@ -71,6 +73,7 @@ export interface DailyWorkReport {
   totalHours: number;
   blockers: string;
   planForTomorrow: string;
+  summaryHtml: string;
   reviewStatus: DwrReviewStatus;
   leadRating: number | null;
   leadRemarks: string;
@@ -86,6 +89,7 @@ export interface SaveReportInput {
   reportDate: string;
   blockers: string;
   planForTomorrow: string;
+  summaryHtml: string;
   items: DwrItemInput[];
 }
 

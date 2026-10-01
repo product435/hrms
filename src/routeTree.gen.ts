@@ -22,6 +22,7 @@ import { Route as ExpensesRouteImport } from './routes/expenses'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as HelpdeskRouteImport } from './routes/helpdesk'
+import { Route as InsightsRouteImport } from './routes/insights'
 import { Route as KraRouteImport } from './routes/kra'
 import { Route as LeaveRouteImport } from './routes/leave'
 import { Route as NotificationsRouteImport } from './routes/notifications'
@@ -41,6 +42,8 @@ import { Route as UnauthorizedRouteImport } from './routes/unauthorized'
 import { Route as WorkRouteImport } from './routes/work'
 import { Route as EmployeesIndexRouteImport } from './routes/employees.index'
 import { Route as EmployeesEmployeeIdRouteImport } from './routes/employees.$employeeId'
+import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
+import { Route as ProjectsProjectIdRouteImport } from './routes/projects.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -105,6 +108,11 @@ const GoalsRoute = GoalsRouteImport.update({
 const HelpdeskRoute = HelpdeskRouteImport.update({
   id: '/helpdesk',
   path: '/helpdesk',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InsightsRoute = InsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
   getParentRoute: () => rootRouteImport,
 } as any)
 const KraRoute = KraRouteImport.update({
@@ -202,6 +210,16 @@ const EmployeesEmployeeIdRoute = EmployeesEmployeeIdRouteImport.update({
   path: '/employees/$employeeId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -217,6 +235,7 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/insights': typeof InsightsRoute
   '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
@@ -235,7 +254,9 @@ export interface FileRoutesByFullPath {
   '/unauthorized': typeof UnauthorizedRoute
   '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/employees/': typeof EmployeesIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -251,6 +272,7 @@ export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/insights': typeof InsightsRoute
   '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
@@ -269,7 +291,9 @@ export interface FileRoutesByTo {
   '/unauthorized': typeof UnauthorizedRoute
   '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/employees': typeof EmployeesIndexRoute
+  '/projects': typeof ProjectsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -286,6 +310,7 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/goals': typeof GoalsRoute
   '/helpdesk': typeof HelpdeskRoute
+  '/insights': typeof InsightsRoute
   '/kra': typeof KraRoute
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
@@ -304,7 +329,9 @@ export interface FileRoutesById {
   '/unauthorized': typeof UnauthorizedRoute
   '/work': typeof WorkRoute
   '/employees/$employeeId': typeof EmployeesEmployeeIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/employees/': typeof EmployeesIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -322,6 +349,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/insights'
     | '/kra'
     | '/leave'
     | '/notifications'
@@ -340,7 +368,9 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/work'
     | '/employees/$employeeId'
+    | '/projects/$projectId'
     | '/employees/'
+    | '/projects/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -356,6 +386,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/insights'
     | '/kra'
     | '/leave'
     | '/notifications'
@@ -374,7 +405,9 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/work'
     | '/employees/$employeeId'
+    | '/projects/$projectId'
     | '/employees'
+    | '/projects'
   id:
     | '__root__'
     | '/'
@@ -390,6 +423,7 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/goals'
     | '/helpdesk'
+    | '/insights'
     | '/kra'
     | '/leave'
     | '/notifications'
@@ -408,7 +442,9 @@ export interface FileRouteTypes {
     | '/unauthorized'
     | '/work'
     | '/employees/$employeeId'
+    | '/projects/$projectId'
     | '/employees/'
+    | '/projects/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -425,6 +461,7 @@ export interface RootRouteChildren {
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   GoalsRoute: typeof GoalsRoute
   HelpdeskRoute: typeof HelpdeskRoute
+  InsightsRoute: typeof InsightsRoute
   KraRoute: typeof KraRoute
   LeaveRoute: typeof LeaveRoute
   NotificationsRoute: typeof NotificationsRoute
@@ -443,7 +480,9 @@ export interface RootRouteChildren {
   UnauthorizedRoute: typeof UnauthorizedRoute
   WorkRoute: typeof WorkRoute
   EmployeesEmployeeIdRoute: typeof EmployeesEmployeeIdRoute
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   EmployeesIndexRoute: typeof EmployeesIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -537,6 +576,13 @@ declare module '@tanstack/react-router' {
       path: '/helpdesk'
       fullPath: '/helpdesk'
       preLoaderRoute: typeof HelpdeskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/insights': {
+      id: '/insights'
+      path: '/insights'
+      fullPath: '/insights'
+      preLoaderRoute: typeof InsightsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/kra': {
@@ -672,6 +718,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EmployeesEmployeeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId': {
+      id: '/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ProjectsProjectIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -689,6 +749,7 @@ const rootRouteChildren: RootRouteChildren = {
   ForgotPasswordRoute: ForgotPasswordRoute,
   GoalsRoute: GoalsRoute,
   HelpdeskRoute: HelpdeskRoute,
+  InsightsRoute: InsightsRoute,
   KraRoute: KraRoute,
   LeaveRoute: LeaveRoute,
   NotificationsRoute: NotificationsRoute,
@@ -707,7 +768,9 @@ const rootRouteChildren: RootRouteChildren = {
   UnauthorizedRoute: UnauthorizedRoute,
   WorkRoute: WorkRoute,
   EmployeesEmployeeIdRoute: EmployeesEmployeeIdRoute,
+  ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   EmployeesIndexRoute: EmployeesIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

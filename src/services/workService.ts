@@ -68,6 +68,8 @@ interface LooseRow {
   total_hours?: number | null;
   blockers?: string | null;
   plan_for_tomorrow?: string | null;
+  summary_html?: string | null;
+  is_unplanned?: boolean | null;
   review_status?: DwrReviewStatus | null;
   lead_rating?: number | null;
   lead_remarks?: string | null;
@@ -141,6 +143,7 @@ function mapItem(row: LooseRow): DwrItem {
     description: row.description ?? "",
     hours: Number(row.hours ?? 0),
     itemStatus: (row.item_status ?? "done") as DwrItemStatus,
+    isUnplanned: Boolean(row.is_unplanned),
   };
 }
 
@@ -156,6 +159,7 @@ function mapReport(row: LooseRow): DailyWorkReport {
     totalHours: Number(row.total_hours ?? 0),
     blockers: row.blockers ?? "",
     planForTomorrow: row.plan_for_tomorrow ?? "",
+    summaryHtml: row.summary_html ?? "",
     reviewStatus: (row.review_status ?? "pending") as DwrReviewStatus,
     leadRating: row.lead_rating == null ? null : Number(row.lead_rating),
     leadRemarks: row.lead_remarks ?? "",
@@ -188,6 +192,7 @@ function itemPayload(items: SaveReportInput["items"]) {
     description: item.description,
     hours: item.hours,
     item_status: item.itemStatus,
+    is_unplanned: item.isUnplanned && !item.taskId,
   }));
 }
 
@@ -195,7 +200,7 @@ const TASK_SELECT =
   "id, organization_id, project_id, assigned_by, assigned_to, title, description, priority, due_date, estimated_hours, status, completed_at, projects(name), assignee:employees!tasks_assigned_to_fkey(first_name,last_name), assigner:employees!tasks_assigned_by_fkey(first_name,last_name)";
 
 const REPORT_SELECT =
-  "id, employee_id, report_date, status, submitted_at, total_hours, blockers, plan_for_tomorrow, review_status, lead_rating, lead_remarks, reviewed_by, reviewed_at, escalated, reopen_reason, waiver_reason, employees!daily_work_reports_employee_id_fkey(first_name,last_name), dwr_items(id, task_id, description, hours, item_status)";
+  "id, employee_id, report_date, status, submitted_at, total_hours, blockers, plan_for_tomorrow, summary_html, review_status, lead_rating, lead_remarks, reviewed_by, reviewed_at, escalated, reopen_reason, waiver_reason, employees!daily_work_reports_employee_id_fkey(first_name,last_name), dwr_items(id, task_id, description, hours, item_status, is_unplanned)";
 
 export const workService = {
   async listProjects(): Promise<Project[]> {
@@ -354,11 +359,12 @@ export const workService = {
 
   async saveDraft(input: SaveReportInput): Promise<string> {
     const db = database();
-    const { data, error } = await db.rpc("save_dwr_draft", {
+    const { data, error } = await db.rpc("save_dwr_draft_v2", {
       p_report_date: input.reportDate,
       p_blockers: input.blockers,
       p_plan_for_tomorrow: input.planForTomorrow,
       p_items: itemPayload(input.items),
+      p_summary_html: input.summaryHtml,
     });
     if (error) throw error;
     return String(data);
@@ -366,11 +372,12 @@ export const workService = {
 
   async submitReport(input: SaveReportInput): Promise<{ id: string; status: DwrStatus }> {
     const db = database();
-    const { data, error } = await db.rpc("submit_dwr", {
+    const { data, error } = await db.rpc("submit_dwr_v2", {
       p_report_date: input.reportDate,
       p_blockers: input.blockers,
       p_plan_for_tomorrow: input.planForTomorrow,
       p_items: itemPayload(input.items),
+      p_summary_html: input.summaryHtml,
     });
     if (error) throw error;
     const body = (data ?? {}) as { id?: string; status?: DwrStatus };

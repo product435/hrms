@@ -3,6 +3,7 @@ import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { ATTENDANCE_ROUTE_ROLES } from "@/lib/nav-fragments/attendance";
 import { kraNavItem } from "@/lib/nav-fragments/kra";
 import { onboardingRouteRoles } from "@/lib/nav-fragments/onboarding";
+import { projectsNavItem } from "@/lib/nav-fragments/projects";
 import { workNavItem } from "@/lib/nav-fragments/work";
 import { ALL_ROLES, normalizeRole, STAFF_ROLES } from "@/lib/roles";
 import type { Role, SessionUser } from "@/types";
@@ -371,6 +372,7 @@ export const ROUTE_ROLES: Record<string, Role[]> = {
   "/recruitment": ["admin", "hr"],
   "/attendance": ATTENDANCE_ROUTE_ROLES,
   "/work": workNavItem.roles,
+  "/projects": projectsNavItem.roles,
   "/shifts": STAFF_ROLES,
   "/leave": ALL_ROLES,
   "/payroll": ["admin", "hr", "employee"],

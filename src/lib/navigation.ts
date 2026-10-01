@@ -17,12 +17,14 @@ import {
   Receipt,
   Settings,
   ShieldCheck,
+  Sparkles,
   Target,
   UserPlus,
   Users,
 } from "lucide-react";
 import { ATTENDANCE_ROUTE_ROLES } from "@/lib/nav-fragments/attendance";
 import { kraEmployeeLabelOverrides, kraNavItem } from "@/lib/nav-fragments/kra";
+import { projectsNavItem } from "@/lib/nav-fragments/projects";
 import { workNavItem } from "@/lib/nav-fragments/work";
 import { ALL_ROLES, STAFF_ROLES } from "@/lib/roles";
 import type { Role } from "@/types";
@@ -108,11 +110,13 @@ export const navSections: NavSection[] = [
       { label: "Goals", to: "/goals", icon: Target, roles: ALL },
       { label: "Performance", to: "/performance", icon: ChartBar, roles: ALL },
       kraNavItem,
+      { label: "AI Insights", to: "/insights", icon: Sparkles, roles: STAFF_ROLES },
     ],
   },
   {
     title: "Workplace",
     items: [
+      projectsNavItem,
       { label: "Assets", to: "/assets", icon: LaptopMinimal, roles: ALL },
       { label: "Documents", to: "/documents", icon: FileText, roles: ALL },
       { label: "HR Helpdesk", to: "/helpdesk", icon: LifeBuoy, roles: ALL },

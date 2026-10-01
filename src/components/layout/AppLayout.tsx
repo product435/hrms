@@ -3,6 +3,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SidebarNav } from "./SidebarNav";
 import { Topbar } from "./Topbar";
+import { BetaBanner } from "./BetaBanner";
 import { useSession } from "@/hooks/useSession";
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -32,6 +33,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <Topbar onOpenSidebar={() => setMobileOpen(true)} />
+          <BetaBanner />
           <main className="mx-auto w-full max-w-[1600px] flex-1 space-y-6 px-3 py-5 sm:px-5 sm:py-6 lg:px-8 lg:py-8">
             {children}
           </main>
