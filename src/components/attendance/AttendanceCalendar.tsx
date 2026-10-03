@@ -1,4 +1,5 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { InfoHint } from "@/components/common/InfoHint";
 import { Button } from "@/components/ui/button";
 import type { AttendanceCalendarDay, CalendarDayStatus } from "@/types/attendance";
 
@@ -138,8 +139,24 @@ export function AttendanceCalendar({
               {CELL[status].label}
             </span>
             <span className="capitalize">{status.replace("-", " ")}</span>
+            {status === "half-day" ? (
+              <InfoHint label="About half-day">
+                Worked hours are below the half-day threshold (4 hours, unless the organisation
+                changed it). The day is not counted as a full present day.
+              </InfoHint>
+            ) : null}
           </li>
         ))}
+        <li className="inline-flex items-center gap-1.5">
+          <span className="grid h-5 min-w-5 place-items-center rounded bg-info/15 px-1 font-semibold text-info">
+            CO
+          </span>
+          <span>Comp-off eligible</span>
+          <InfoHint label="About comp-off eligible">
+            Shown when you work a week-off or a mandatory holiday. The day is flagged
+            comp-off-eligible so compensatory off can be considered.
+          </InfoHint>
+        </li>
       </ul>
     </div>
   );

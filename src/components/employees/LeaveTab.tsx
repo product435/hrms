@@ -1,7 +1,9 @@
+import { InfoHint } from "@/components/common/InfoHint";
 import { SectionCard } from "@/components/common/SectionCard";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { TabsContent } from "@/components/ui/tabs";
 import { dayMonth } from "@/lib/format";
+import { HOW_LEAVE_WORKS, leaveTypeHint } from "@/lib/leave-hints";
 import type { LeaveRequest } from "@/types";
 
 export type LeaveBalanceEntry = {
@@ -21,11 +23,15 @@ export function LeaveTab({
 }) {
   return (
     <TabsContent value="leave" className="mt-4 space-y-4">
+      <SectionCard title="How leave works">
+        <p className="text-sm text-muted-foreground">{HOW_LEAVE_WORKS}</p>
+      </SectionCard>
       <div className="grid gap-3 sm:grid-cols-4">
         {(balance ?? []).map((entry) => (
           <div key={entry.id} className="surface-card p-4">
-            <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
-              {entry.name}
+            <p className="flex items-center gap-1 text-xs uppercase tracking-[0.14em] text-muted-foreground">
+              <span className="truncate">{entry.name}</span>
+              <InfoHint label={`About ${entry.name} leave`}>{leaveTypeHint(entry.name)}</InfoHint>
             </p>
             <p className="mt-1 font-display text-2xl font-bold">{entry.remaining}</p>
             <p className="text-xs text-muted-foreground">

@@ -48,6 +48,7 @@ interface LooseRow {
   assignee?: { first_name?: string | null; last_name?: string | null } | null;
   title?: string | null;
   description?: string | null;
+  description_html?: string | null;
   priority?: TaskPriority | null;
   due_date?: string | null;
   estimated_hours?: number | null;
@@ -141,6 +142,7 @@ function mapItem(row: LooseRow): DwrItem {
     id: row.id ?? "",
     taskId: row.task_id ?? null,
     description: row.description ?? "",
+    descriptionHtml: row.description_html ?? "",
     hours: Number(row.hours ?? 0),
     itemStatus: (row.item_status ?? "done") as DwrItemStatus,
     isUnplanned: Boolean(row.is_unplanned),
@@ -200,7 +202,7 @@ const TASK_SELECT =
   "id, organization_id, project_id, assigned_by, assigned_to, title, description, priority, due_date, estimated_hours, status, completed_at, projects(name), assignee:employees!tasks_assigned_to_fkey(first_name,last_name), assigner:employees!tasks_assigned_by_fkey(first_name,last_name)";
 
 const REPORT_SELECT =
-  "id, employee_id, report_date, status, submitted_at, total_hours, blockers, plan_for_tomorrow, summary_html, review_status, lead_rating, lead_remarks, reviewed_by, reviewed_at, escalated, reopen_reason, waiver_reason, employees!daily_work_reports_employee_id_fkey(first_name,last_name), dwr_items(id, task_id, description, hours, item_status, is_unplanned)";
+  "id, employee_id, report_date, status, submitted_at, total_hours, blockers, plan_for_tomorrow, summary_html, review_status, lead_rating, lead_remarks, reviewed_by, reviewed_at, escalated, reopen_reason, waiver_reason, employees!daily_work_reports_employee_id_fkey(first_name,last_name), dwr_items(id, task_id, description, description_html, hours, item_status, is_unplanned)";
 
 export const workService = {
   async listProjects(): Promise<Project[]> {

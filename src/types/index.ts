@@ -314,6 +314,7 @@ export interface NotificationItem {
   // Complaints tab -- there's no separate single-complaint detail page.
   referenceId?: string;
   referenceType?: string;
+  targetProjectId?: string;
 }
 
 export type ComplaintPriority = "low" | "medium" | "high" | "urgent";

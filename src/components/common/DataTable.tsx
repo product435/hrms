@@ -16,7 +16,7 @@ export type SortValue = string | number | boolean | Date | null | undefined;
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: ReactNode;
   cell: (row: T) => ReactNode;
   className?: string;
   align?: "left" | "right";
@@ -168,7 +168,7 @@ export function DataTable<T>({
                             : undefined
                         }
                         className={cn(
-                          "whitespace-nowrap text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground",
+                          "whitespace-nowrap text-xs font-semibold uppercase tracking-widest text-muted-foreground",
                           col.align === "right" && "text-right",
                           col.className,
                         )}

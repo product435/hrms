@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { normalizeRole } from "@/lib/roles";
 import type { Role } from "@/types";
+import type { DwrItem, DwrItemStatus, DwrReviewStatus, DwrStatus } from "@/types/work";
 
 type LooseRow = Record<string, unknown>;
 
@@ -131,10 +132,15 @@ export interface EmployeeWorkSnapshot {
   reports: Array<{
     id: string;
     date: string;
-    status: string;
+    status: DwrStatus;
     hours: number | null;
-    reviewStatus: string;
+    reviewStatus: DwrReviewStatus;
     rating: number | null;
+    blockers: string;
+    planForTomorrow: string;
+    summaryHtml: string;
+    leadRemarks: string;
+    items: DwrItem[];
   }>;
   tasks: Array<{
     id: string;
@@ -175,6 +181,37 @@ function mapEmployeeMetric(row: LooseRow): OrgEmployeeMetric {
 function rowsOf(value: unknown): LooseRow[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is LooseRow => Boolean(item) && typeof item === "object");
+}
+
+const ITEM_STATUSES: readonly DwrItemStatus[] = ["todo", "in-progress", "blocked", "done"];
+const REPORT_STATUSES: readonly DwrStatus[] = ["draft", "submitted", "late", "missed"];
+const REVIEW_STATUSES: readonly DwrReviewStatus[] = ["pending", "approved", "needs-revision"];
+
+function asItemStatus(value: unknown): DwrItemStatus {
+  const raw = text(value, "done");
+  return ITEM_STATUSES.includes(raw as DwrItemStatus) ? (raw as DwrItemStatus) : "done";
+}
+
+function asReportStatus(value: unknown): DwrStatus {
+  const raw = text(value, "draft");
+  return REPORT_STATUSES.includes(raw as DwrStatus) ? (raw as DwrStatus) : "draft";
+}
+
+function asReviewStatus(value: unknown): DwrReviewStatus {
+  const raw = text(value, "pending");
+  return REVIEW_STATUSES.includes(raw as DwrReviewStatus) ? (raw as DwrReviewStatus) : "pending";
+}
+
+function mapWorkItem(row: LooseRow): DwrItem {
+  return {
+    id: text(field(row, "id")),
+    taskId: text(field(row, "task_id")) || null,
+    description: text(field(row, "description")),
+    descriptionHtml: text(field(row, "description_html")),
+    hours: num(field(row, "hours")) ?? 0,
+    itemStatus: asItemStatus(field(row, "item_status")),
+    isUnplanned: field(row, "is_unplanned") === true,
+  };
 }
 
 const ROLE_RANK: Record<Role, number> = {
@@ -286,7 +323,9 @@ export const roleService = {
     const [reports, tasks] = await Promise.all([
       db
         .from("daily_work_reports")
-        .select("id, report_date, status, total_hours, review_status, lead_rating")
+        .select(
+          "id, report_date, status, total_hours, review_status, lead_rating, blockers, plan_for_tomorrow, summary_html, lead_remarks, dwr_items(id, task_id, description, description_html, hours, item_status, is_unplanned)",
+        )
         .eq("employee_id", employeeId)
         .order("report_date", { ascending: false })
         .limit(8),
@@ -304,10 +343,15 @@ export const roleService = {
       reports: rowsOf(reports.data).map((row) => ({
         id: text(field(row, "id")),
         date: text(field(row, "report_date")),
-        status: text(field(row, "status"), "draft"),
+        status: asReportStatus(field(row, "status")),
         hours: num(field(row, "total_hours")),
-        reviewStatus: text(field(row, "review_status"), "pending"),
+        reviewStatus: asReviewStatus(field(row, "review_status")),
         rating: num(field(row, "lead_rating")),
+        blockers: text(field(row, "blockers")),
+        planForTomorrow: text(field(row, "plan_for_tomorrow")),
+        summaryHtml: text(field(row, "summary_html")),
+        leadRemarks: text(field(row, "lead_remarks")),
+        items: rowsOf(field(row, "dwr_items")).map(mapWorkItem),
       })),
       tasks: rowsOf(tasks.data).map((row) => ({
         id: text(field(row, "id")),

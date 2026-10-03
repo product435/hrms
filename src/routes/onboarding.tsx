@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCircle2, Circle, X } from "lucide-react";
@@ -44,6 +44,8 @@ export const Route = createFileRoute("/onboarding")({
   }),
   component: OnboardingPage,
 });
+
+const MORNING_SHIFT_ID = "77777777-7777-7777-7777-777777777771";
 
 const BUCKETS: { id: OnboardingQueueBucket | "changes-panel"; label: string }[] = [
   { id: "incomplete", label: "Incomplete" },
@@ -446,6 +448,20 @@ function ApproveDialog({
     employeeCode: "",
     overrideJoiningDateReason: "",
   });
+  const shiftDefaulted = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      shiftDefaulted.current = false;
+      return;
+    }
+    if (shiftDefaulted.current) return;
+    const shifts = references.data?.shifts ?? [];
+    const morning = shifts.find((item) => item.id === MORNING_SHIFT_ID);
+    const chosen = morning ?? (shifts.length === 1 ? shifts[0] : undefined);
+    if (!chosen) return;
+    shiftDefaulted.current = true;
+    setForm((current) => (current.shiftId ? current : { ...current, shiftId: chosen.id }));
+  }, [open, references.data]);
   const past = form.joiningDate < istToday();
   const roles: AppRole[] = canAssignAdmin
     ? ["employee", "team_lead", "dept_head", "hr", "admin"]

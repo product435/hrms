@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TabsContent } from "@/components/ui/tabs";
 import { percent, shortDate } from "@/lib/format";
+import { WorkReportDetailDialog } from "@/components/work/WorkReportDetail";
 import { attendanceService } from "@/services/attendanceService";
 import { kraService } from "@/services/kraService";
-import { roleService } from "@/services/roleService";
+import { roleService, type EmployeeWorkSnapshot } from "@/services/roleService";
 import type { Goal, PerformanceReview } from "@/types";
 import { currentKraPeriod } from "@/types/kra";
+import type { DailyWorkReport } from "@/types/work";
 
 function monthBounds(period: string) {
   const [year, month] = period.split("-").map(Number);
@@ -24,6 +26,33 @@ function scoreText(value: number | null | undefined) {
   return value == null || Number.isNaN(value) ? "Not rated" : value.toFixed(1);
 }
 
+function toDetailReport(
+  employeeId: string,
+  report: EmployeeWorkSnapshot["reports"][number],
+): DailyWorkReport {
+  return {
+    id: report.id,
+    employeeId,
+    employeeName: "",
+    reportDate: report.date,
+    status: report.status,
+    submittedAt: null,
+    totalHours: report.hours ?? 0,
+    blockers: report.blockers,
+    planForTomorrow: report.planForTomorrow,
+    summaryHtml: report.summaryHtml,
+    reviewStatus: report.reviewStatus,
+    leadRating: report.rating,
+    leadRemarks: report.leadRemarks,
+    reviewedBy: null,
+    reviewedAt: null,
+    escalated: false,
+    reopenReason: "",
+    waiverReason: "",
+    items: report.items,
+  };
+}
+
 export function PerformanceTab({
   employeeId,
   goals,
@@ -34,6 +63,7 @@ export function PerformanceTab({
   reviews: PerformanceReview[] | undefined;
 }) {
   const [period, setPeriod] = useState(currentKraPeriod());
+  const [openReport, setOpenReport] = useState<DailyWorkReport | null>(null);
   const bounds = monthBounds(period);
   const attendance = useQuery({
     queryKey: ["employee-attendance-month", employeeId, period],
@@ -132,16 +162,22 @@ export function PerformanceTab({
           ) : (
             <ul className="divide-y divide-border">
               {reports.map((report) => (
-                <li key={report.id} className="flex items-center gap-3 px-5 py-3.5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold">{shortDate(report.date)}</p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {report.hours == null ? "Hours not recorded" : `${report.hours}h`} · review{" "}
-                      {report.reviewStatus}
-                      {report.rating == null ? "" : ` · rating ${report.rating}`}
-                    </p>
-                  </div>
-                  <StatusBadge status={report.status} />
+                <li key={report.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-5 py-3.5 text-left hover:bg-muted/40"
+                    onClick={() => setOpenReport(toDetailReport(employeeId, report))}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{shortDate(report.date)}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {report.hours == null ? "Hours not recorded" : `${report.hours}h`} · review{" "}
+                        {report.reviewStatus}
+                        {report.rating == null ? "" : ` · rating ${report.rating}`}
+                      </p>
+                    </div>
+                    <StatusBadge status={report.status} />
+                  </button>
                 </li>
               ))}
             </ul>
@@ -286,6 +322,7 @@ export function PerformanceTab({
           ) : null}
         </ul>
       </SectionCard>
+      <WorkReportDetailDialog report={openReport} readOnly onClose={() => setOpenReport(null)} />
     </TabsContent>
   );
 }

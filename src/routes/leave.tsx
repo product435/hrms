@@ -7,6 +7,7 @@ import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
+import { InfoHint } from "@/components/common/InfoHint";
 import { StatCard } from "@/components/common/StatCard";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
@@ -35,6 +36,7 @@ import { leaveService } from "@/services/leaveService";
 import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { dayMonth, shortDate } from "@/lib/format";
+import { HOW_LEAVE_WORKS, leaveTypeHint } from "@/lib/leave-hints";
 import type { LeaveRequest } from "@/types";
 
 function errorDescription(error: unknown) {
@@ -369,6 +371,10 @@ function LeavePage() {
         }
       />
 
+      <SectionCard title="How leave works">
+        <p className="text-sm text-muted-foreground">{HOW_LEAVE_WORKS}</p>
+      </SectionCard>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {(balance.data ?? []).map((entry, index) => {
           const tones = ["info", "accent", "success"] as const;
@@ -380,6 +386,9 @@ function LeavePage() {
               icon={ClipboardList}
               tone={tones[index % tones.length] ?? "info"}
               hint={`${entry.used} used of ${entry.allocated}`}
+              info={
+                <InfoHint label={`About ${entry.name} leave`}>{leaveTypeHint(entry.name)}</InfoHint>
+              }
             />
           );
         })}

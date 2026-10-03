@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -7,6 +7,7 @@ import { Check, Eye, ListChecks, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { IconAction } from "@/components/common/IconAction";
+import { InfoHint } from "@/components/common/InfoHint";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { DataTable, type Column } from "@/components/common/DataTable";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -31,9 +32,17 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { RichTextEditor, SafeHtml } from "@/components/rich-text";
+import { RichTextEditor } from "@/components/rich-text";
+import { WorkReportDetailDialog } from "@/components/work/WorkReportDetail";
 import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
+import {
+  claimPasteBlockNotice,
+  descriptionsLookAi,
+  DWR_AI_DESCRIPTION_MESSAGE,
+  DWR_PASTE_BLOCKED_MESSAGE,
+  isBlockedDescriptionInputType,
+} from "@/lib/dwr-ai-guard";
 import { shiftBounds, submitPhase, type SubmitPhase } from "@/lib/dwr-window";
 import { indiaDateKey, indianTime, shortDate } from "@/lib/format";
 import { workService } from "@/services/workService";
@@ -102,29 +111,6 @@ const summarySchema = z.object({
 
 type SummaryFormValues = z.infer<typeof summarySchema>;
 
-const reviewSchema = z
-  .object({
-    decision: z.enum(["approved", "needs-revision"]),
-    rating: z.string(),
-    remarks: z.string().max(2000),
-  })
-  .superRefine((value, ctx) => {
-    if (value.decision === "approved" && !["1", "2", "3", "4", "5"].includes(value.rating)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Choose a rating from 1 to 5.",
-        path: ["rating"],
-      });
-    }
-    if (value.decision === "needs-revision" && value.remarks.trim().length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Remarks are required.",
-        path: ["remarks"],
-      });
-    }
-  });
-
 function messageOf(error: unknown) {
   if (error instanceof Error) return error.message;
   if (
@@ -142,6 +128,21 @@ function emptyItem(): ReportFormValues["items"][number] {
   return { taskId: "", description: "", hours: 1, itemStatus: "done", isUnplanned: false };
 }
 
+function rejectDescriptionInsert(event: { preventDefault: () => void }) {
+  event.preventDefault();
+  if (claimPasteBlockNotice()) toast.error(DWR_PASTE_BLOCKED_MESSAGE);
+}
+
+function rejectDescriptionBeforeInput(event: FormEvent<HTMLInputElement>) {
+  const native = event.nativeEvent;
+  if (!(native instanceof InputEvent) || !isBlockedDescriptionInputType(native.inputType)) return;
+  rejectDescriptionInsert(event);
+}
+
+function rejectDescriptionDrop(event: DragEvent<HTMLInputElement>) {
+  rejectDescriptionInsert(event);
+}
+
 function phaseCopy(phase: SubmitPhase, opensAt: Date, closesAt: Date) {
   if (phase === "before-window") {
     return `Drafts can be saved now. Submit opens at ${indianTime(opensAt)} IST, 30 minutes before your shift ends.`;
@@ -151,6 +152,35 @@ function phaseCopy(phase: SubmitPhase, opensAt: Date, closesAt: Date) {
   if (phase === "late")
     return `This submission will be marked late. The window closes at ${indianTime(closesAt)} IST.`;
   return "The window closed at 10:00 IST. A missing report is marked missed.";
+}
+
+const REPORT_STATUS_HELP = (
+  <div className="space-y-1">
+    <p>Draft: saved, not submitted yet.</p>
+    <p>Submitted: sent inside the on-time window, which opens 30 minutes before the shift ends.</p>
+    <p>Late: sent after that window and before 10:00 IST.</p>
+    <p>Missed: nothing was submitted by 10:00 IST. HR can waive a missed report.</p>
+  </div>
+);
+
+const REVIEW_STATUS_HELP = (
+  <div className="space-y-1">
+    <p>Pending: waiting for a team lead, department head, HR, or an admin.</p>
+    <p>Approved: accepted. An approved report can be reopened.</p>
+    <p>Needs revision: sent back with remarks so it can be submitted again.</p>
+    <p>
+      Escalated: still unreviewed after 48 hours, or there is no manager, so it is with the
+      department head. It is not a rejection.
+    </p>
+  </div>
+);
+
+function ReportStatusHint() {
+  return <InfoHint label="About work report statuses">{REPORT_STATUS_HELP}</InfoHint>;
+}
+
+function ReviewStatusHint() {
+  return <InfoHint label="About work report review statuses">{REVIEW_STATUS_HELP}</InfoHint>;
 }
 
 function WorkPage() {
@@ -527,6 +557,7 @@ function ReportsPanel() {
     queryKey: ["work", "reports"],
     queryFn: () => workService.listReports(),
   });
+  const [viewing, setViewing] = useState<DailyWorkReport | null>(null);
   const today = indiaDateKey();
   const form = useForm<ReportFormValues>({
     resolver: zodResolver(reportSchema),
@@ -637,9 +668,25 @@ function ReportsPanel() {
               ? phaseCopy(phase, bounds.windowOpensAt, bounds.lateClosesAt)
               : "Loading your shift."
         }
-        action={existing ? <StatusBadge status={existing.status} /> : null}
+        action={
+          existing ? (
+            <span className="inline-flex items-center gap-1.5">
+              <StatusBadge status={existing.status} />
+              <ReportStatusHint />
+            </span>
+          ) : null
+        }
       >
-        <form className="space-y-4" onSubmit={form.handleSubmit((values) => submit.mutate(values))}>
+        <form
+          className="space-y-4"
+          onSubmit={form.handleSubmit((values) => {
+            if (descriptionsLookAi(values.items.map((item) => item.description))) {
+              toast.error(DWR_AI_DESCRIPTION_MESSAGE);
+              return;
+            }
+            submit.mutate(values);
+          })}
+        >
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="report-date">Report date</Label>
@@ -737,8 +784,20 @@ function ReportsPanel() {
                   </div>
                 ) : null}
                 <div className="grid gap-1.5 sm:col-span-1">
-                  <Label>What you did</Label>
-                  <Input {...form.register(`items.${index}.description`)} disabled={locked} />
+                  <div className="flex items-center gap-1.5">
+                    <Label>What you did</Label>
+                    <InfoHint label="About describing your work">
+                      Type in your own words. Pasting or AI-generated text is blocked.
+                    </InfoHint>
+                  </div>
+                  <Input
+                    {...form.register(`items.${index}.description`)}
+                    disabled={locked}
+                    onBeforeInput={rejectDescriptionBeforeInput}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={rejectDescriptionDrop}
+                    onPaste={rejectDescriptionInsert}
+                  />
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Hours</Label>
@@ -847,7 +906,16 @@ function ReportsPanel() {
           </div>
         </form>
       </SectionCard>
-      <SectionCard title="My reports" description="Submitted, late, and missed days.">
+      <SectionCard
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            My reports
+            <ReportStatusHint />
+            <ReviewStatusHint />
+          </span>
+        }
+        description="Submitted, late, and missed days."
+      >
         <div className="space-y-2">
           {(reports.data ?? [])
             .filter((report) => report.employeeId === me)
@@ -856,7 +924,7 @@ function ReportsPanel() {
                 key={report.id}
                 type="button"
                 className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left"
-                onClick={() => form.setValue("reportDate", report.reportDate)}
+                onClick={() => setViewing(report)}
               >
                 <span className="text-sm">{shortDate(report.reportDate)}</span>
                 <span className="flex items-center gap-2">
@@ -871,6 +939,7 @@ function ReportsPanel() {
           ) : null}
         </div>
       </SectionCard>
+      <WorkReportDetailDialog report={viewing} readOnly onClose={() => setViewing(null)} />
     </div>
   );
 }
@@ -933,10 +1002,24 @@ function TeamPanel() {
           </div>
         ),
       },
-      { key: "status", header: "Report", cell: (row) => <StatusBadge status={row.status} /> },
+      {
+        key: "status",
+        header: (
+          <span className="inline-flex items-center gap-1">
+            Report
+            <ReportStatusHint />
+          </span>
+        ),
+        cell: (row) => <StatusBadge status={row.status} />,
+      },
       {
         key: "review",
-        header: "Review",
+        header: (
+          <span className="inline-flex items-center gap-1">
+            Review
+            <ReviewStatusHint />
+          </span>
+        ),
         cell: (row) => (
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={row.reviewStatus} />
@@ -952,12 +1035,22 @@ function TeamPanel() {
             <IconAction
               label={row.reviewStatus === "approved" ? "Reopen" : "Review"}
               variant="outline"
-              onClick={() => setReviewing(row)}
+              onClick={(event) => {
+                event.stopPropagation();
+                setReviewing(row);
+              }}
             >
               {row.reviewStatus === "approved" ? <RotateCcw /> : <Eye />}
             </IconAction>
           ) : row.status === "missed" && (isHr || isSuperAdmin) ? (
-            <IconAction label="Waive" variant="outline" onClick={() => setReviewing(row)}>
+            <IconAction
+              label="Waive"
+              variant="outline"
+              onClick={(event) => {
+                event.stopPropagation();
+                setReviewing(row);
+              }}
+            >
               <Check />
             </IconAction>
           ) : null,
@@ -976,6 +1069,7 @@ function TeamPanel() {
           isLoading={reports.isLoading}
           isError={reports.isError}
           onRetry={() => void reports.refetch()}
+          onRowClick={(row) => setReviewing(row)}
           emptyTitle="No team reports"
           emptyDescription="Reports from people in your scope appear here after they submit."
         />
@@ -1022,11 +1116,11 @@ function TeamPanel() {
           </div>
         </SectionCard>
       ) : null}
-      <ReviewDialog
+      <WorkReportDetailDialog
         report={reviewing}
         canWaive={isHr || isSuperAdmin}
         onClose={() => setReviewing(null)}
-        onDone={() => {
+        onReviewed={() => {
           setReviewing(null);
           void queryClient.invalidateQueries({ queryKey: ["work", "reports"] });
         }}
@@ -1133,161 +1227,5 @@ function TeamConclusionForm({
         </div>
       </form>
     </SectionCard>
-  );
-}
-
-function ReviewDialog({
-  report,
-  canWaive,
-  onClose,
-  onDone,
-}: {
-  report: DailyWorkReport | null;
-  canWaive: boolean;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const form = useForm<z.infer<typeof reviewSchema>>({
-    resolver: zodResolver(reviewSchema),
-    defaultValues: { decision: "approved", rating: "5", remarks: "" },
-  });
-  const [reason, setReason] = useState("");
-  const review = useMutation({
-    mutationFn: (values: z.infer<typeof reviewSchema>) => {
-      if (!report) throw new Error("Choose a report.");
-      return workService.reviewReport(
-        report.id,
-        values.decision,
-        values.decision === "approved" ? Number(values.rating) : null,
-        values.remarks,
-      );
-    },
-    onSuccess: () => {
-      toast.success("Review saved");
-      onDone();
-    },
-    onError: (error) => toast.error("Could not save the review", { description: messageOf(error) }),
-  });
-  const reopen = useMutation({
-    mutationFn: () => {
-      if (!report) throw new Error("Choose a report.");
-      if (!reason.trim()) throw new Error("A reason is required.");
-      return workService.reopenReport(report.id, reason);
-    },
-    onSuccess: () => {
-      toast.success("Report reopened");
-      onDone();
-    },
-    onError: (error) =>
-      toast.error("Could not reopen the report", { description: messageOf(error) }),
-  });
-  const waive = useMutation({
-    mutationFn: () => {
-      if (!report) throw new Error("Choose a report.");
-      if (!reason.trim()) throw new Error("A reason is required.");
-      return workService.waiveMissed(report.id, reason);
-    },
-    onSuccess: () => {
-      toast.success("Missed report waived");
-      onDone();
-    },
-    onError: (error) =>
-      toast.error("Could not waive the report", { description: messageOf(error) }),
-  });
-
-  const approved = report?.reviewStatus === "approved";
-  const missed = report?.status === "missed";
-
-  return (
-    <Dialog open={Boolean(report)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            {report?.employeeName || "Report"} · {report ? shortDate(report.reportDate) : ""}
-          </DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2 text-sm">
-          {(report?.items ?? []).map((item) => (
-            <p key={item.id}>
-              {item.description} · {item.hours}h · {item.itemStatus}
-            </p>
-          ))}
-          {report?.summaryHtml ? <SafeHtml html={report.summaryHtml} /> : null}
-          {report?.blockers ? <p>Blockers: {report.blockers}</p> : null}
-          {report?.planForTomorrow ? <p>Tomorrow: {report.planForTomorrow}</p> : null}
-        </div>
-        {missed && canWaive ? (
-          <div className="grid gap-2">
-            <Label>Waiver reason</Label>
-            <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />
-            <Button onClick={() => waive.mutate()} disabled={waive.isPending}>
-              Waive missed report
-            </Button>
-          </div>
-        ) : approved ? (
-          <div className="grid gap-2">
-            <Label>Reason to reopen</Label>
-            <Textarea value={reason} onChange={(event) => setReason(event.target.value)} />
-            <Button onClick={() => reopen.mutate()} disabled={reopen.isPending}>
-              Reopen
-            </Button>
-          </div>
-        ) : (
-          <form
-            className="grid gap-3"
-            onSubmit={form.handleSubmit((values) => review.mutate(values))}
-          >
-            <div className="grid gap-1.5">
-              <Label>Decision</Label>
-              <Select
-                value={form.watch("decision")}
-                onValueChange={(value) =>
-                  form.setValue("decision", value as "approved" | "needs-revision")
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="approved">Approve</SelectItem>
-                  <SelectItem value="needs-revision">Needs revision</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Rating</Label>
-              <Select
-                value={form.watch("rating")}
-                onValueChange={(value) => form.setValue("rating", value)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["1", "2", "3", "4", "5"].map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.rating ? (
-                <p className="text-xs text-destructive">{form.formState.errors.rating.message}</p>
-              ) : null}
-            </div>
-            <div className="grid gap-1.5">
-              <Label>Remarks</Label>
-              <Textarea {...form.register("remarks")} />
-              {form.formState.errors.remarks ? (
-                <p className="text-xs text-destructive">{form.formState.errors.remarks.message}</p>
-              ) : null}
-            </div>
-            <Button type="submit" disabled={review.isPending}>
-              Save review
-            </Button>
-          </form>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }

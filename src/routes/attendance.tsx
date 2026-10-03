@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Clock, Download, Home, LogIn, LogOut, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { IconAction } from "@/components/common/IconAction";
+import { InfoHint } from "@/components/common/InfoHint";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -30,6 +31,31 @@ import { requireAuthForPath } from "@/lib/auth-guard";
 import { indiaDateKey, indiaLocalDateTimeToUtcIso, indianTime, shortDate } from "@/lib/format";
 import type { AttendanceRecord } from "@/types";
 import type { TeamAttendanceRow } from "@/types/attendance";
+
+const ATTENDANCE_STATUS_HELP = (
+  <div className="space-y-1">
+    <p>Present: checked in within the shift grace period.</p>
+    <p>Late: check-in after that grace period.</p>
+    <p>
+      Half-day: worked hours are below the half-day threshold (4 hours, unless the organisation
+      changed it).
+    </p>
+    <p>Work from home: the day is remote. Check-in and check-out are still required.</p>
+    <p>Leave, holiday, and week-off: you are not expected to punch in.</p>
+    <p>Absent: no approved attendance on a working day.</p>
+    <p>
+      Comp-off-eligible: you worked a week-off or a mandatory holiday, so the day is flagged for
+      compensatory off.
+    </p>
+  </div>
+);
+
+const REGULARIZATION_HELP =
+  "If a check-in or check-out is wrong or missing, request the correct time and a reason. A team lead, department head, HR, or an admin approves it. On approval the attendance row is updated and the hours are recalculated. The limit is 3 requests a month. HR and admin can go beyond that limit.";
+
+function AttendanceStatusHint() {
+  return <InfoHint label="About attendance statuses">{ATTENDANCE_STATUS_HELP}</InfoHint>;
+}
 
 export const Route = createFileRoute("/attendance")({
   beforeLoad: () => requireAuthForPath("/attendance"),
@@ -332,7 +358,12 @@ function AttendancePage() {
       },
       {
         key: "status",
-        header: "Status",
+        header: (
+          <span className="inline-flex items-center gap-1">
+            Status
+            <AttendanceStatusHint />
+          </span>
+        ),
         cell: (row) => (
           <span className="flex flex-wrap gap-1">
             <StatusBadge status={row.status} />
@@ -376,7 +407,16 @@ function AttendancePage() {
         header: "Check out",
         cell: (row) => <span className="text-sm">{indianTime(row.checkOut)}</span>,
       },
-      { key: "status", header: "Status", cell: (row) => <StatusBadge status={row.status} /> },
+      {
+        key: "status",
+        header: (
+          <span className="inline-flex items-center gap-1">
+            Status
+            <AttendanceStatusHint />
+          </span>
+        ),
+        cell: (row) => <StatusBadge status={row.status} />,
+      },
     ],
     [],
   );
@@ -401,9 +441,12 @@ function AttendancePage() {
             <Button variant="outline" onClick={() => setWfhOpen(true)}>
               <Home className="size-4" /> Work from home
             </Button>
-            <Button variant="outline" onClick={() => setRegularizeOpen(true)}>
-              Request regularization
-            </Button>
+            <span className="inline-flex items-center gap-1">
+              <Button variant="outline" onClick={() => setRegularizeOpen(true)}>
+                Request regularization
+              </Button>
+              <InfoHint label="About request regularization">{REGULARIZATION_HELP}</InfoHint>
+            </span>
             {canExport ? (
               <Button
                 variant="outline"
@@ -472,7 +515,10 @@ function AttendancePage() {
         >
           {isSelfService ? (
             <div className="space-y-3 p-5 text-sm">
-              <p className="text-muted-foreground">Status</p>
+              <p className="inline-flex items-center gap-1.5 text-muted-foreground">
+                Status
+                <AttendanceStatusHint />
+              </p>
               <StatusBadge status={today.data?.status ?? "week-off"} />
               <p className="text-muted-foreground">
                 {today.data?.date
@@ -497,7 +543,12 @@ function AttendancePage() {
       </div>
 
       <SectionCard
-        title="Month"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Month
+            <AttendanceStatusHint />
+          </span>
+        }
         description="Present, late, half-day, leave, holiday, week-off and absent."
       >
         {calendar.isLoading ? (

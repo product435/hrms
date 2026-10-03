@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import { InfoHint } from "@/components/common/InfoHint";
 import { SectionCard } from "@/components/common/SectionCard";
 import { Button } from "@/components/ui/button";
 import {
@@ -109,7 +110,16 @@ export function BetaTab() {
   return (
     <div className="space-y-4">
       <SectionCard
-        title="Beta mode"
+        title={
+          <span className="inline-flex items-center gap-1.5">
+            Beta mode
+            <InfoHint label="About beta mode">
+              While a beta end date is set, everyone sees a banner that data may be reset. Clearing
+              data is only allowed during this window. After the date passes, the banner hides and
+              the reset is blocked.
+            </InfoHint>
+          </span>
+        }
         description="While a beta end date is set, a banner tells everyone data may be reset. Clearing data is only allowed during this window."
         bodyClassName="space-y-4 p-5"
       >
@@ -198,9 +208,16 @@ export function BetaTab() {
             </ul>
           </div>
         </div>
-        <Button variant="destructive" onClick={() => setOpen(true)}>
-          <AlertTriangle className="mr-2 size-4" /> Clear beta data…
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="destructive" onClick={() => setOpen(true)}>
+            <AlertTriangle className="mr-2 size-4" /> Clear beta data…
+          </Button>
+          <InfoHint label="About clearing beta data">
+            Deletes operational data such as attendance, work reports, leave, and documents.
+            Organisation setup, employees, and approved payroll runs are kept. This is only allowed
+            while a beta end date is set, and it cannot be undone.
+          </InfoHint>
+        </div>
       </SectionCard>
 
       <Dialog

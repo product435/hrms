@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowDownRight, ArrowUpRight, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -9,6 +10,7 @@ interface StatCardProps {
   delta?: { value: string; direction: "up" | "down" };
   icon?: LucideIcon;
   tone?: "primary" | "accent" | "success" | "warning" | "info" | "destructive" | "neutral";
+  info?: ReactNode;
 }
 
 const toneMap: Record<NonNullable<StatCardProps["tone"]>, string> = {
@@ -28,14 +30,18 @@ export function StatCard({
   delta,
   icon: Icon,
   tone = "primary",
+  info,
 }: StatCardProps) {
   return (
     <article className="surface-card group relative overflow-hidden p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-float sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            {label}
-          </p>
+          <div className="flex items-center gap-1">
+            <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              {label}
+            </p>
+            {info}
+          </div>
           <p className="mt-2 font-display text-3xl font-bold leading-none tracking-tight">
             {value}
           </p>

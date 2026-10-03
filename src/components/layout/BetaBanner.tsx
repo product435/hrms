@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FlaskConical, X } from "lucide-react";
+import { InfoHint } from "@/components/common/InfoHint";
 import { useSession } from "@/hooks/useSession";
 import { settingsService } from "@/services/settingsService";
 
@@ -37,6 +38,10 @@ export function BetaBanner() {
     <div className="flex items-center gap-2 border-b border-amber-300/60 bg-amber-50 px-3 py-1.5 text-xs text-amber-900 sm:px-5 lg:px-8">
       <FlaskConical className="size-3.5 shrink-0" />
       <p className="flex-1">Beta — data may be reset until {label}.</p>
+      <InfoHint label="About the beta banner" className="text-amber-900 hover:text-amber-950">
+        This organisation is in beta until the date shown. An admin can clear operational data
+        during that window. Dismissing this notice only hides it for this browser session.
+      </InfoHint>
       <button
         type="button"
         aria-label="Dismiss beta notice"

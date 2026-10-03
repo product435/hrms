@@ -1,5 +1,5 @@
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   Bell,
@@ -29,6 +29,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 import { useTheme } from "@/hooks/useTheme";
 import { indianDateTime } from "@/lib/format";
+import { notificationTarget } from "@/lib/notification-target";
 import { queryKeys } from "@/lib/query-keys";
 import { workplaceService } from "@/services/workplaceService";
 
@@ -36,6 +37,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const { user, role, signOut, can } = useSession();
   const navigate = useNavigate();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { theme, toggleTheme } = useTheme();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [signingOut, setSigningOut] = useState<"local" | "global" | null>(null);
@@ -58,6 +60,13 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
   const notifications = useQuery({
     queryKey: queryKeys.notifications.topbar,
     queryFn: () => workplaceService.notifications(),
+  });
+  const markRead = useMutation({
+    mutationFn: (id: string) => workplaceService.markRead(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.notifications.topbar });
+    },
   });
   const notificationItems = notifications.data ?? [];
   const unread = notificationItems.filter((n) => !n.read).length;
@@ -140,15 +149,43 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
               <StatusBadge status={`${unread} new`} tone="info" />
             </div>
             <ul className="scroll-slim max-h-72 divide-y divide-border overflow-y-auto">
-              {notificationItems.slice(0, 4).map((item) => (
-                <li key={item.id} className="px-4 py-3">
-                  <p className="text-sm font-medium">{item.title}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground/80">
-                    {indianDateTime(item.createdAt)}
-                  </p>
-                </li>
-              ))}
+              {notificationItems.slice(0, 4).map((item) => {
+                const target = notificationTarget(item);
+                const content = (
+                  <>
+                    <p className="text-sm font-medium">{item.title}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{item.description}</p>
+                    <p className="mt-1 text-[11px] text-muted-foreground/80">
+                      {indianDateTime(item.createdAt)}
+                    </p>
+                  </>
+                );
+                return (
+                  <li key={item.id}>
+                    {target ? (
+                      <a
+                        href={target.href}
+                        onClick={() => {
+                          if (!item.read) markRead.mutate(item.id);
+                        }}
+                        className="block px-4 py-3 transition-colors hover:bg-primary/10"
+                      >
+                        {content}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!item.read) markRead.mutate(item.id);
+                        }}
+                        className="block w-full px-4 py-3 text-left transition-colors hover:bg-primary/10"
+                      >
+                        {content}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             <div className="border-t border-border p-2">
               <Button asChild variant="ghost" size="sm" className="w-full">

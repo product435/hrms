@@ -522,7 +522,6 @@ function EmployeeDetailPage() {
             <Field label="Joined" value={shortDate(emp.joinedOn)} />
             <Field label="Blood group" value={emp.bloodGroup} />
             <Field label="Gender" value={emp.gender} />
-            <Field label="Exit date" value={emp.exitDate ? shortDate(emp.exitDate) : "—"} />
           </div>
         </SectionCard>
 
@@ -539,7 +538,7 @@ function EmployeeDetailPage() {
           </TabsList>
 
           <PersonalTab employee={emp} footer={passwordForm} />
-          <EmploymentTab employee={emp} />
+          <EmploymentTab employee={emp} isOwnProfile={isOwnProfile} />
           <AttendanceTab
             records={attendance.data}
             canRequestCorrection={canManage || isOwnProfile}

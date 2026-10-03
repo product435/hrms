@@ -50,6 +50,7 @@ export interface DwrItem {
   id: string;
   taskId: string | null;
   description: string;
+  descriptionHtml: string;
   hours: number;
   itemStatus: DwrItemStatus;
   isUnplanned: boolean;

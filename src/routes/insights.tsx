@@ -17,6 +17,7 @@ import {
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
+import { InfoHint } from "@/components/common/InfoHint";
 import { StatCard } from "@/components/common/StatCard";
 import { EmptyState, ErrorState } from "@/components/common/States";
 import { Button } from "@/components/ui/button";
@@ -253,6 +254,12 @@ function InsightsPage() {
               label="Tasks due in period"
               value={String(data.tasks.dueInPeriod)}
               hint={`${data.tasks.completed} completed`}
+              info={
+                <InfoHint label="About tasks due in period">
+                  Tasks whose due date falls in the selected period. This count is computed from
+                  task records.
+                </InfoHint>
+              }
             />
             <StatCard
               label="On-time rate"
@@ -263,17 +270,33 @@ function InsightsPage() {
                   : "Of completed tasks"
               }
               tone="success"
+              info={
+                <InfoHint label="About the on-time rate">
+                  Share of completed tasks finished by their due date. Computed from task records,
+                  not by the AI.
+                </InfoHint>
+              }
             />
             <StatCard
               label="Open past due"
               value={String(data.tasks.openPastDue)}
               tone="destructive"
+              info={
+                <InfoHint label="About open past due">
+                  Tasks that are still open after their due date.
+                </InfoHint>
+              }
             />
             <StatCard
               label="Report submission"
               value={pct(data.dwr.submissionRate)}
               hint={`${data.dwr.submittedOnTime + data.dwr.submittedLate} of ${data.dwr.expectedDays} expected days`}
               tone="info"
+              info={
+                <InfoHint label="About report submission">
+                  Share of expected working days that have a submitted or late work report.
+                </InfoHint>
+              }
             />
           </div>
 
@@ -305,7 +328,18 @@ function InsightsPage() {
             </SectionCard>
 
             <SectionCard
-              title="AI score breakdown"
+              title={
+                <span className="inline-flex items-center gap-1.5">
+                  AI score breakdown
+                  <InfoHint label="About AI insight scores">
+                    Each score is 0–100 and advisory. Scores are not written to KPI scores. Delivery
+                    is how work was finished against what was due. Consistency is how steadily
+                    reports and work showed up. Communication is how clear the written reports are.
+                    Blocker resolution is how blockers in the reports were handled. Fewer than 3
+                    submitted reports are not scored. Thin evidence is scored near 50.
+                  </InfoHint>
+                </span>
+              }
               description={
                 result
                   ? `Model ${result.model ?? "n/a"} · prompt v1`

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -11,6 +11,7 @@ import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { indianDateTime } from "@/lib/format";
+import { notificationTarget } from "@/lib/notification-target";
 import { queryKeys } from "@/lib/query-keys";
 import { workplaceService } from "@/services/workplaceService";
 import type { NotificationItem } from "@/types";
@@ -90,46 +91,39 @@ function NotificationsPage() {
       ) : (
         <SectionCard title="Inbox" bodyClassName="divide-y divide-border p-0">
           <ul>
-            {(notifications.data ?? []).map((item) => (
-              <li
-                key={item.id}
-                role={item.read ? undefined : "button"}
-                onClick={() => {
-                  if (!item.read) markRead.mutate(item.id);
-                }}
-                className={`px-5 py-4 ${item.read ? "bg-background" : "cursor-pointer bg-primary/5"}`}
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold">{item.title}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
-                    <p className="mt-2 text-xs text-muted-foreground/80">
-                      {indianDateTime(item.createdAt)}
-                    </p>
-                    <ComplaintNotificationLink item={item} />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {!item.read ? (
-                      <IconAction
-                        label="Mark read"
-                        variant="ghost"
-                        disabled={markRead.isPending}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          markRead.mutate(item.id);
-                        }}
-                      >
-                        <Check />
-                      </IconAction>
-                    ) : null}
-                    <StatusBadge
-                      status={item.read ? "Read" : "New"}
-                      tone={item.read ? "neutral" : "info"}
+            {(notifications.data ?? []).map((item) => {
+              const target = notificationTarget(item);
+              return (
+                <li key={item.id} className={item.read ? "bg-background" : "bg-primary/5"}>
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <NotificationBody
+                      item={item}
+                      target={target}
+                      onOpen={() => markRead.mutate(item.id)}
                     />
+                    <div className="flex items-center gap-2">
+                      {!item.read ? (
+                        <IconAction
+                          label="Mark read"
+                          variant="ghost"
+                          disabled={markRead.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            markRead.mutate(item.id);
+                          }}
+                        >
+                          <Check />
+                        </IconAction>
+                      ) : null}
+                      <StatusBadge
+                        status={item.read ? "Read" : "New"}
+                        tone={item.read ? "neutral" : "info"}
+                      />
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         </SectionCard>
       )}
@@ -137,16 +131,51 @@ function NotificationsPage() {
   );
 }
 
-function ComplaintNotificationLink({ item }: { item: NotificationItem }) {
-  if (item.referenceType !== "employee_complaint" || !item.referenceId) return null;
+function NotificationBody({
+  item,
+  target,
+  onOpen,
+}: {
+  item: NotificationItem;
+  target: ReturnType<typeof notificationTarget>;
+  onOpen: () => void;
+}) {
+  const content = (
+    <>
+      <p className="text-sm font-semibold">{item.title}</p>
+      <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>
+      <p className="mt-2 text-xs text-muted-foreground/80">{indianDateTime(item.createdAt)}</p>
+      {target ? (
+        <span className="mt-2 inline-block text-xs font-semibold text-primary">
+          {target.label} →
+        </span>
+      ) : null}
+    </>
+  );
+
+  if (!target) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          if (!item.read) onOpen();
+        }}
+        className="min-w-0 flex-1 px-5 py-4 text-left"
+      >
+        {content}
+      </button>
+    );
+  }
+
   return (
-    <Link
-      to="/employees/$employeeId"
-      params={{ employeeId: item.referenceId }}
-      search={{ tab: "complaints" }}
-      className="mt-2 inline-block text-xs font-semibold text-primary hover:underline"
+    <a
+      href={target.href}
+      onClick={() => {
+        if (!item.read) onOpen();
+      }}
+      className="min-w-0 flex-1 px-5 py-4 text-left transition-colors hover:bg-primary/10"
     >
-      Open complaint →
-    </Link>
+      {content}
+    </a>
   );
 }

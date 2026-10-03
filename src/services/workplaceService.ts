@@ -601,16 +601,42 @@ export const workplaceService = {
     if (userId) query = query.eq("user_id", userId);
     const { data, error } = await query;
     if (error) throw error;
-    return (data ?? []).map((r) => ({
-      id: r.id,
-      title: r.title ?? "",
-      description: r.message ?? "",
-      type: (r.type ?? "system") as NotificationItem["type"],
-      createdAt: r.created_at ?? "",
-      read: r.is_read ?? false,
-      ...(r.reference_id ? { referenceId: r.reference_id } : {}),
-      ...(r.reference_type ? { referenceType: r.reference_type } : {}),
-    }));
+    const rows = data ?? [];
+    const projectMessageIds = rows
+      .filter((r) => r.reference_type === "project_message" && r.reference_id)
+      .map((r) => r.reference_id as string);
+    const projectByMessage = new Map<string, string>();
+    if (projectMessageIds.length) {
+      const messages = await (supabase as any)
+        .from("project_messages")
+        .select("id, project_id")
+        .in("id", [...new Set(projectMessageIds)]);
+      if (messages.error) throw messages.error;
+      for (const message of (messages.data ?? []) as Array<{
+        id?: string | null;
+        project_id?: string | null;
+      }>) {
+        if (message.id && message.project_id) projectByMessage.set(message.id, message.project_id);
+      }
+    }
+
+    return rows.map((r) => {
+      const item: NotificationItem = {
+        id: r.id,
+        title: r.title ?? "",
+        description: r.message ?? "",
+        type: (r.type ?? "system") as NotificationItem["type"],
+        createdAt: r.created_at ?? "",
+        read: r.is_read ?? false,
+      };
+      if (r.reference_id) item.referenceId = r.reference_id;
+      if (r.reference_type) item.referenceType = r.reference_type;
+      if (r.reference_type === "project_message" && r.reference_id) {
+        const projectId = projectByMessage.get(r.reference_id);
+        if (projectId) item.targetProjectId = projectId;
+      }
+      return item;
+    });
   },
   // notifications_self_all (user_id = auth.uid()) already permits an
   // authenticated user to update their own rows -- no schema change needed.

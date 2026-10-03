@@ -9,7 +9,9 @@ import { CardsSkeleton } from "@/components/common/States";
 import { DistributionDonut } from "@/components/charts/DistributionDonut";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { employeeService } from "@/services/employeeService";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   Dialog,
   DialogContent,
@@ -43,6 +45,8 @@ export const Route = createFileRoute("/departments")({
 });
 
 function DepartmentsPage() {
+  const { isHr, isSuperAdmin } = usePermissions();
+  const seesOrgHeadcount = isHr || isSuperAdmin;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -106,7 +110,22 @@ function DepartmentsPage() {
                       <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
                         Headcount
                       </p>
-                      <p className="font-display text-2xl font-bold">{dept.headcount}</p>
+                      {seesOrgHeadcount ? (
+                        <p className="font-display text-2xl font-bold">{dept.headcount}</p>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="font-display text-2xl font-bold leading-none"
+                              aria-label="Only your own team is visible to you"
+                            >
+                              —
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Only your own team is visible to you</TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">
@@ -135,10 +154,16 @@ function DepartmentsPage() {
 
         <SectionCard title="Headcount split" description="Share by department">
           {departments.data ? (
-            <DistributionDonut
-              height={300}
-              data={departments.data.map((d) => ({ name: d.name, value: d.headcount }))}
-            />
+            seesOrgHeadcount ? (
+              <DistributionDonut
+                height={300}
+                data={departments.data.map((d) => ({ name: d.name, value: d.headcount }))}
+              />
+            ) : (
+              <p className="px-2 py-16 text-center text-sm text-muted-foreground">
+                Only your own team is visible to you
+              </p>
+            )
           ) : (
             <div className="h-75" />
           )}
