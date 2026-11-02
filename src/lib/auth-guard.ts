@@ -6,6 +6,7 @@ import {
   consumeEmploymentBlockNotice,
   hasEmploymentBlockNotice,
   isEmploymentAccessError,
+  requiresCrmAccess,
   rolesForPath,
   sessionForUser,
   type AuthSession,
@@ -159,6 +160,9 @@ export async function requireAuthForPath(pathname: string) {
   const session = await requireAuth();
   const allowed = rolesForPath(pathname);
   if (allowed && !allowed.includes(session.user.role)) {
+    throw redirect({ to: "/unauthorized" });
+  }
+  if (requiresCrmAccess(pathname) && session.user.crm?.hasAccess !== true) {
     throw redirect({ to: "/unauthorized" });
   }
   return session;

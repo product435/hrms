@@ -11,6 +11,8 @@ import {
   ClipboardList,
   FileText,
   Gauge,
+  Handshake,
+  LayoutDashboard,
   LaptopMinimal,
   LifeBuoy,
   Megaphone,
@@ -26,7 +28,7 @@ import { ATTENDANCE_ROUTE_ROLES } from "@/lib/nav-fragments/attendance";
 import { kraEmployeeLabelOverrides, kraNavItem } from "@/lib/nav-fragments/kra";
 import { projectsNavItem } from "@/lib/nav-fragments/projects";
 import { workNavItem } from "@/lib/nav-fragments/work";
-import { ALL_ROLES, STAFF_ROLES } from "@/lib/roles";
+import { ALL_ROLES, ORG_OVERVIEW_ROLES, STAFF_ROLES } from "@/lib/roles";
 import type { Role } from "@/types";
 
 export interface NavItem {
@@ -35,6 +37,12 @@ export interface NavItem {
   icon: typeof Users;
   roles: Role[];
   badge?: string;
+  /** Extra access check beyond the role list. "crm": sales team, Super Admin, General Manager. */
+  requires?: "crm";
+}
+
+export interface NavAccess {
+  crm?: boolean;
 }
 
 export interface NavSection {
@@ -49,6 +57,12 @@ export const navSections: NavSection[] = [
     title: "Overview",
     items: [
       { label: "Dashboard", to: "/", icon: Gauge, roles: ALL },
+      {
+        label: "Org Overview",
+        to: "/org-overview",
+        icon: LayoutDashboard,
+        roles: ORG_OVERVIEW_ROLES,
+      },
       { label: "Announcements", to: "/announcements", icon: Megaphone, roles: ALL },
       { label: "Notifications", to: "/notifications", icon: Bell, roles: ALL },
     ],
@@ -105,6 +119,10 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    title: "Sales",
+    items: [{ label: "CRM", to: "/crm", icon: Handshake, roles: ALL, requires: "crm" }],
+  },
+  {
     title: "Growth",
     items: [
       { label: "Goals", to: "/goals", icon: Target, roles: ALL },
@@ -133,11 +151,13 @@ export const navSections: NavSection[] = [
   },
 ];
 
-export function navForRole(role: Role): NavSection[] {
+export function navForRole(role: Role, access: NavAccess = {}): NavSection[] {
   return navSections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => item.roles.includes(role)),
+      items: section.items.filter(
+        (item) => item.roles.includes(role) && (item.requires !== "crm" || access.crm === true),
+      ),
     }))
     .filter((section) => section.items.length > 0);
 }

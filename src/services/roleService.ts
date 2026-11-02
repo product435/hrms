@@ -215,7 +215,8 @@ function mapWorkItem(row: LooseRow): DwrItem {
 }
 
 const ROLE_RANK: Record<Role, number> = {
-  admin: 5,
+  admin: 6,
+  general_manager: 5,
   hr: 4,
   dept_head: 3,
   team_lead: 2,

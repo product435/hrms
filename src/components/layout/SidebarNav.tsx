@@ -14,7 +14,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { role, user } = useSession();
   const profileEmployeeId = user.employeeId ?? user.id;
   const pathname = useRouterState({ select: (state) => state.location.pathname });
-  const sections = navForRole(role);
+  const sections = navForRole(role, { crm: user.crm?.hasAccess === true });
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">

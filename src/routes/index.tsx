@@ -34,6 +34,9 @@ import { workplaceService } from "@/services/workplaceService";
 import { attendanceService } from "@/services/attendanceService";
 import { assetService } from "@/services/assetService";
 import { passwordResetRequestService } from "@/services/passwordResetRequestService";
+import { roleService } from "@/services/roleService";
+import { BandLabel } from "@/components/common/BandLabel";
+import { currentKraPeriod, formatKraScore, performanceBand } from "@/types/kra";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSession } from "@/hooks/useSession";
 import { requireAuthForPath } from "@/lib/auth-guard";
@@ -46,6 +49,11 @@ import {
   percent,
   shortDate,
 } from "@/lib/format";
+
+/** Score as text; a dash when unscored, since the band label already says "Not rated". */
+function scoreText(value: number | null | undefined) {
+  return value == null ? "—" : formatKraScore(value);
+}
 
 export const Route = createFileRoute("/")({
   beforeLoad: () => requireAuthForPath("/"),
@@ -102,8 +110,55 @@ function monthOptionLabel(label: string): string {
   });
 }
 
+/** General Manager dashboard card: who needs attention this month. */
+function OrgPerformanceSnapshot() {
+  const period = currentKraPeriod();
+  const board = useQuery({
+    queryKey: ["org-performance", period],
+    queryFn: () => roleService.performanceBoard(period),
+  });
+  const rows = board.data?.bottom ?? [];
+  return (
+    <SectionCard
+      title="Needs attention"
+      description="Lowest performance index this month"
+      action={
+        <Button asChild variant="ghost" size="sm">
+          <Link to="/org-overview">Org overview</Link>
+        </Button>
+      }
+      bodyClassName="p-0"
+    >
+      <ul className="divide-y divide-border">
+        {rows.slice(0, 5).map((row) => (
+          <li key={row.employeeId} className="flex items-center gap-3 px-5 py-3.5">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-xs font-bold">
+              {initialsOf(row.employeeName)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">{row.employeeName}</p>
+              <p className="truncate text-xs text-muted-foreground">{row.departmentName}</p>
+            </div>
+            <span className="text-sm font-semibold tabular-nums">
+              {scoreText(row.performanceIndex)}
+            </span>
+            <BandLabel band={performanceBand(row.performanceIndex)} />
+          </li>
+        ))}
+        {board.isLoading ? (
+          <li className="px-5 py-8 text-center text-sm text-muted-foreground">Loading…</li>
+        ) : rows.length === 0 ? (
+          <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+            No performance scores yet this month.
+          </li>
+        ) : null}
+      </ul>
+    </SectionCard>
+  );
+}
+
 function OrgDashboard() {
-  const { user, role, isLead, isTeamLead } = usePermissions();
+  const { user, role, isLead, isTeamLead, isGeneralManager } = usePermissions();
   const [headcountMonth, setHeadcountMonth] = useState("");
   const summary = useQuery({
     queryKey: ["summary"],
@@ -144,6 +199,7 @@ function OrgDashboard() {
   // manager can never decide on their own request -- only a direct
   // report's -- so it's excluded from "waiting on you" specifically.
   const pending = useQuery({
+    enabled: !isGeneralManager,
     queryKey: ["leave", "pending", role, user.id],
     queryFn: async () => {
       const rows = isLead
@@ -174,11 +230,17 @@ function OrgDashboard() {
             <Button asChild variant="outline">
               <Link to="/reports">View reports</Link>
             </Button>
-            <Button asChild>
-              <Link to="/leave" search={{ status: "pending" }}>
-                Review approvals
-              </Link>
-            </Button>
+            {isGeneralManager ? (
+              <Button asChild>
+                <Link to="/org-overview">Org overview</Link>
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link to="/leave" search={{ status: "pending" }}>
+                  Review approvals
+                </Link>
+              </Button>
+            )}
           </>
         }
       />
@@ -208,13 +270,23 @@ function OrgDashboard() {
             tone="warning"
             hint={`${s.onLeaveToday} on leave today`}
           />
-          <StatCard
-            label="Payroll (current)"
-            value={compactInr(s.payrollNet)}
-            icon={BadgeIndianRupee}
-            tone="info"
-            hint={`Status: ${s.payrollStatus}`}
-          />
+          {isGeneralManager ? (
+            <StatCard
+              label="Open positions"
+              value={String(openings.data?.length ?? 0)}
+              icon={ClipboardList}
+              tone="info"
+              hint="Requisitions currently hiring"
+            />
+          ) : (
+            <StatCard
+              label="Payroll (current)"
+              value={compactInr(s.payrollNet)}
+              icon={BadgeIndianRupee}
+              tone="info"
+              hint={`Status: ${s.payrollStatus}`}
+            />
+          )}
         </div>
       )}
 
@@ -265,39 +337,43 @@ function OrgDashboard() {
           {headcount.data ? <HeadcountBarChart data={headcount.data} /> : <div className="h-65" />}
         </SectionCard>
 
-        <SectionCard
-          title="Approvals waiting on you"
-          description="Leave requests in the queue"
-          action={
-            <Button asChild variant="ghost" size="sm">
-              <Link to="/leave">All requests</Link>
-            </Button>
-          }
-          bodyClassName="p-0"
-        >
-          <ul className="divide-y divide-border">
-            {(pending.data ?? []).slice(0, 5).map((request) => (
-              <li key={request.id} className="flex items-center gap-3 px-5 py-3.5">
-                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-xs font-bold">
-                  {initialsOf(request.employeeName)}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{request.employeeName}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {request.type} · {dayMonth(request.from)} – {dayMonth(request.to)} ·{" "}
-                    {request.days}d
-                  </p>
-                </div>
-                <StatusBadge status={request.status} />
-              </li>
-            ))}
-            {pending.data && pending.data.length === 0 ? (
-              <li className="px-5 py-8 text-center text-sm text-muted-foreground">
-                No pending approvals.
-              </li>
-            ) : null}
-          </ul>
-        </SectionCard>
+        {isGeneralManager ? (
+          <OrgPerformanceSnapshot />
+        ) : (
+          <SectionCard
+            title="Approvals waiting on you"
+            description="Leave requests in the queue"
+            action={
+              <Button asChild variant="ghost" size="sm">
+                <Link to="/leave">All requests</Link>
+              </Button>
+            }
+            bodyClassName="p-0"
+          >
+            <ul className="divide-y divide-border">
+              {(pending.data ?? []).slice(0, 5).map((request) => (
+                <li key={request.id} className="flex items-center gap-3 px-5 py-3.5">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-xs font-bold">
+                    {initialsOf(request.employeeName)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{request.employeeName}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {request.type} · {dayMonth(request.from)} – {dayMonth(request.to)} ·{" "}
+                      {request.days}d
+                    </p>
+                  </div>
+                  <StatusBadge status={request.status} />
+                </li>
+              ))}
+              {pending.data && pending.data.length === 0 ? (
+                <li className="px-5 py-8 text-center text-sm text-muted-foreground">
+                  No pending approvals.
+                </li>
+              ) : null}
+            </ul>
+          </SectionCard>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

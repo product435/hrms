@@ -961,19 +961,21 @@ function toPayload(values: ReportFormValues) {
 }
 
 function TeamPanel() {
-  const { user, isLead, isHr, isSuperAdmin, isDeptHead } = usePermissions();
+  const { user, isLead, isHr, isSuperAdmin, isDeptHead, isGeneralManager } = usePermissions();
   const me = user.employeeId ?? "";
   const queryClient = useQueryClient();
   const canReview = isLead || isHr || isSuperAdmin || isDeptHead;
+  // A General Manager reads every report in the organisation but does not review them.
+  const canSeeTeam = canReview || isGeneralManager;
   const reports = useQuery({
     queryKey: ["work", "reports"],
     queryFn: () => workService.listReports(),
-    enabled: canReview,
+    enabled: canSeeTeam,
   });
   const summaries = useQuery({
     queryKey: ["work", "summaries"],
     queryFn: () => workService.listSummaries(),
-    enabled: canReview,
+    enabled: canSeeTeam,
   });
   const departments = useQuery({
     queryKey: ["work", "departments"],
@@ -1031,7 +1033,18 @@ function TeamPanel() {
         key: "action",
         header: "",
         cell: (row) =>
-          row.status === "submitted" || row.status === "late" ? (
+          !canReview ? (
+            <IconAction
+              label="View"
+              variant="outline"
+              onClick={(event) => {
+                event.stopPropagation();
+                setReviewing(row);
+              }}
+            >
+              <Eye />
+            </IconAction>
+          ) : row.status === "submitted" || row.status === "late" ? (
             <IconAction
               label={row.reviewStatus === "approved" ? "Reopen" : "Review"}
               variant="outline"
@@ -1056,12 +1069,12 @@ function TeamPanel() {
           ) : null,
       },
     ],
-    [isHr, isSuperAdmin],
+    [canReview, isHr, isSuperAdmin],
   );
 
   return (
     <div className="space-y-4">
-      {canReview ? (
+      {canSeeTeam ? (
         <DataTable
           columns={columns}
           data={teamRows}
@@ -1071,7 +1084,11 @@ function TeamPanel() {
           onRetry={() => void reports.refetch()}
           onRowClick={(row) => setReviewing(row)}
           emptyTitle="No team reports"
-          emptyDescription="Reports from people in your scope appear here after they submit."
+          emptyDescription={
+            isGeneralManager
+              ? "Reports from everyone in the organisation appear here after they submit."
+              : "Reports from people in your scope appear here after they submit."
+          }
         />
       ) : (
         <SectionCard title="Team reports" description="Employees see only their own work.">
@@ -1087,10 +1104,10 @@ function TeamPanel() {
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ["work", "summaries"] })}
         />
       ) : null}
-      {canReview ? (
+      {canSeeTeam ? (
         <SectionCard
           title="Team conclusions"
-          description="Department heads see their department. Super Admin and HR see the organisation."
+          description="Department heads see their department. Super Admin, General Manager and HR see the organisation."
         >
           <div className="space-y-3">
             {(summaries.data ?? []).map((summary) => (
@@ -1118,6 +1135,7 @@ function TeamPanel() {
       ) : null}
       <WorkReportDetailDialog
         report={reviewing}
+        readOnly={!canReview}
         canWaive={isHr || isSuperAdmin}
         onClose={() => setReviewing(null)}
         onReviewed={() => {

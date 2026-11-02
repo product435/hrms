@@ -97,6 +97,7 @@ export function useSession() {
 // eslint-disable-next-line react-refresh/only-export-components -- labels are shared with the session hook
 export const ROLE_LABELS: Record<Role, string> = {
   admin: "Super Admin",
+  general_manager: "General Manager",
   hr: "HR",
   dept_head: "Department Head",
   team_lead: "Team Lead",

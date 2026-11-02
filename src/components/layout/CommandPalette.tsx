@@ -75,7 +75,7 @@ export function CommandPalette({
       icon: NavItem["icon"];
       badge?: string;
       section: string;
-    }[] = navForRole(role).flatMap((section) =>
+    }[] = navForRole(role, { crm: user.crm?.hasAccess === true }).flatMap((section) =>
       section.items.map((item) => ({
         to: item.to,
         label: labelFor(role, item),
@@ -96,7 +96,7 @@ export function CommandPalette({
     return items.filter(
       (item) => item.label.toLowerCase().includes(needle) || item.to.toLowerCase().includes(needle),
     );
-  }, [needle, role]);
+  }, [needle, role, user.crm?.hasAccess]);
 
   const searchQuery = useQuery({
     queryKey: queryKeys.search.global(query.trim()),

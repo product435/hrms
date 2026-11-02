@@ -359,6 +359,30 @@ export const workService = {
     return (data ?? []).map(mapReport);
   },
 
+  /**
+   * Reports in a date range (inclusive), newest first. RLS decides scope:
+   * a General Manager, Super Admin or HR gets the whole organisation.
+   */
+  async listReportsBetween(
+    from: string,
+    to: string,
+    options: { employeeId?: string; limit?: number } = {},
+  ): Promise<DailyWorkReport[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const db = database();
+    let query = db
+      .from("daily_work_reports")
+      .select(REPORT_SELECT)
+      .gte("report_date", from)
+      .lte("report_date", to);
+    if (options.employeeId) query = query.eq("employee_id", options.employeeId);
+    const { data, error } = await query
+      .order("report_date", { ascending: false })
+      .limit(options.limit ?? 500);
+    if (error) throw error;
+    return (data ?? []).map(mapReport);
+  },
+
   async saveDraft(input: SaveReportInput): Promise<string> {
     const db = database();
     const { data, error } = await db.rpc("save_dwr_draft_v2", {

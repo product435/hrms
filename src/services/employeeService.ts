@@ -418,6 +418,7 @@ export const employeeService = {
       if (existing) {
         existing.headcount += counts.get(row.id) ?? 0;
         if (!existing.head && rowHead) existing.head = rowHead;
+        if (row.is_sales === true) existing.isSales = true;
         rowDesignations.forEach((name) => {
           if (!existing.designations.some((d) => normalizeKey(d) === normalizeKey(name))) {
             existing.designations.push(name);
@@ -432,6 +433,7 @@ export const employeeService = {
           openRoles: 0,
           designations: [...rowDesignations],
           costCenter: "",
+          isSales: row.is_sales === true,
         });
       }
     });

@@ -464,7 +464,7 @@ function ApproveDialog({
   }, [open, references.data]);
   const past = form.joiningDate < istToday();
   const roles: AppRole[] = canAssignAdmin
-    ? ["employee", "team_lead", "dept_head", "hr", "admin"]
+    ? ["employee", "team_lead", "dept_head", "hr", "general_manager", "admin"]
     : ["employee", "team_lead", "dept_head", "hr"];
   const approve = useMutation({
     mutationFn: () =>

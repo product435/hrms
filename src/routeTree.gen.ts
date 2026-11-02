@@ -15,6 +15,7 @@ import { Route as AssetsRouteImport } from './routes/assets'
 import { Route as AttendanceRouteImport } from './routes/attendance'
 import { Route as AuditRouteImport } from './routes/audit'
 import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
+import { Route as CrmRouteImport } from './routes/crm'
 import { Route as DepartmentsRouteImport } from './routes/departments'
 import { Route as DesignationsRouteImport } from './routes/designations'
 import { Route as DocumentsRouteImport } from './routes/documents'
@@ -27,6 +28,7 @@ import { Route as KraRouteImport } from './routes/kra'
 import { Route as LeaveRouteImport } from './routes/leave'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as OrgOverviewRouteImport } from './routes/org-overview'
 import { Route as PayrollRouteImport } from './routes/payroll'
 import { Route as PerformanceRouteImport } from './routes/performance'
 import { Route as ProfileStatusRouteImport } from './routes/profile-status'
@@ -73,6 +75,11 @@ const AuditRoute = AuditRouteImport.update({
 const CompleteProfileRoute = CompleteProfileRouteImport.update({
   id: '/complete-profile',
   path: '/complete-profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CrmRoute = CrmRouteImport.update({
+  id: '/crm',
+  path: '/crm',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DepartmentsRoute = DepartmentsRouteImport.update({
@@ -133,6 +140,11 @@ const NotificationsRoute = NotificationsRouteImport.update({
 const OnboardingRoute = OnboardingRouteImport.update({
   id: '/onboarding',
   path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrgOverviewRoute = OrgOverviewRouteImport.update({
+  id: '/org-overview',
+  path: '/org-overview',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PayrollRoute = PayrollRouteImport.update({
@@ -228,6 +240,7 @@ export interface FileRoutesByFullPath {
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/crm': typeof CrmRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -240,6 +253,7 @@ export interface FileRoutesByFullPath {
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/org-overview': typeof OrgOverviewRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
   '/profile-status': typeof ProfileStatusRoute
@@ -265,6 +279,7 @@ export interface FileRoutesByTo {
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/crm': typeof CrmRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -277,6 +292,7 @@ export interface FileRoutesByTo {
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/org-overview': typeof OrgOverviewRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
   '/profile-status': typeof ProfileStatusRoute
@@ -303,6 +319,7 @@ export interface FileRoutesById {
   '/attendance': typeof AttendanceRoute
   '/audit': typeof AuditRoute
   '/complete-profile': typeof CompleteProfileRoute
+  '/crm': typeof CrmRoute
   '/departments': typeof DepartmentsRoute
   '/designations': typeof DesignationsRoute
   '/documents': typeof DocumentsRoute
@@ -315,6 +332,7 @@ export interface FileRoutesById {
   '/leave': typeof LeaveRoute
   '/notifications': typeof NotificationsRoute
   '/onboarding': typeof OnboardingRoute
+  '/org-overview': typeof OrgOverviewRoute
   '/payroll': typeof PayrollRoute
   '/performance': typeof PerformanceRoute
   '/profile-status': typeof ProfileStatusRoute
@@ -342,6 +360,7 @@ export interface FileRouteTypes {
     | '/attendance'
     | '/audit'
     | '/complete-profile'
+    | '/crm'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -354,6 +373,7 @@ export interface FileRouteTypes {
     | '/leave'
     | '/notifications'
     | '/onboarding'
+    | '/org-overview'
     | '/payroll'
     | '/performance'
     | '/profile-status'
@@ -379,6 +399,7 @@ export interface FileRouteTypes {
     | '/attendance'
     | '/audit'
     | '/complete-profile'
+    | '/crm'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -391,6 +412,7 @@ export interface FileRouteTypes {
     | '/leave'
     | '/notifications'
     | '/onboarding'
+    | '/org-overview'
     | '/payroll'
     | '/performance'
     | '/profile-status'
@@ -416,6 +438,7 @@ export interface FileRouteTypes {
     | '/attendance'
     | '/audit'
     | '/complete-profile'
+    | '/crm'
     | '/departments'
     | '/designations'
     | '/documents'
@@ -428,6 +451,7 @@ export interface FileRouteTypes {
     | '/leave'
     | '/notifications'
     | '/onboarding'
+    | '/org-overview'
     | '/payroll'
     | '/performance'
     | '/profile-status'
@@ -454,6 +478,7 @@ export interface RootRouteChildren {
   AttendanceRoute: typeof AttendanceRoute
   AuditRoute: typeof AuditRoute
   CompleteProfileRoute: typeof CompleteProfileRoute
+  CrmRoute: typeof CrmRoute
   DepartmentsRoute: typeof DepartmentsRoute
   DesignationsRoute: typeof DesignationsRoute
   DocumentsRoute: typeof DocumentsRoute
@@ -466,6 +491,7 @@ export interface RootRouteChildren {
   LeaveRoute: typeof LeaveRoute
   NotificationsRoute: typeof NotificationsRoute
   OnboardingRoute: typeof OnboardingRoute
+  OrgOverviewRoute: typeof OrgOverviewRoute
   PayrollRoute: typeof PayrollRoute
   PerformanceRoute: typeof PerformanceRoute
   ProfileStatusRoute: typeof ProfileStatusRoute
@@ -527,6 +553,13 @@ declare module '@tanstack/react-router' {
       path: '/complete-profile'
       fullPath: '/complete-profile'
       preLoaderRoute: typeof CompleteProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/crm': {
+      id: '/crm'
+      path: '/crm'
+      fullPath: '/crm'
+      preLoaderRoute: typeof CrmRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/departments': {
@@ -611,6 +644,13 @@ declare module '@tanstack/react-router' {
       path: '/onboarding'
       fullPath: '/onboarding'
       preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/org-overview': {
+      id: '/org-overview'
+      path: '/org-overview'
+      fullPath: '/org-overview'
+      preLoaderRoute: typeof OrgOverviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/payroll': {
@@ -742,6 +782,7 @@ const rootRouteChildren: RootRouteChildren = {
   AttendanceRoute: AttendanceRoute,
   AuditRoute: AuditRoute,
   CompleteProfileRoute: CompleteProfileRoute,
+  CrmRoute: CrmRoute,
   DepartmentsRoute: DepartmentsRoute,
   DesignationsRoute: DesignationsRoute,
   DocumentsRoute: DocumentsRoute,
@@ -754,6 +795,7 @@ const rootRouteChildren: RootRouteChildren = {
   LeaveRoute: LeaveRoute,
   NotificationsRoute: NotificationsRoute,
   OnboardingRoute: OnboardingRoute,
+  OrgOverviewRoute: OrgOverviewRoute,
   PayrollRoute: PayrollRoute,
   PerformanceRoute: PerformanceRoute,
   ProfileStatusRoute: ProfileStatusRoute,

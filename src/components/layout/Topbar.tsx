@@ -1,3 +1,4 @@
+import { STAFF_ROLES } from "@/lib/roles";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -223,7 +224,7 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
                 <UserCircle2 className="size-4" /> My profile
               </Link>
             </DropdownMenuItem>
-            {can(["admin", "hr", "dept_head", "team_lead"]) ? (
+            {can(STAFF_ROLES) ? (
               <DropdownMenuItem asChild>
                 <Link to="/settings">
                   <Settings className="size-4" /> Settings

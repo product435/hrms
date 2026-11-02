@@ -1,4 +1,4 @@
-export type Role = "admin" | "hr" | "dept_head" | "team_lead" | "employee";
+export type Role = "admin" | "general_manager" | "hr" | "dept_head" | "team_lead" | "employee";
 
 export interface SessionUser {
   id: string;
@@ -10,6 +10,18 @@ export interface SessionUser {
   designation: string;
   department: string;
   avatarUrl?: string;
+  /** CRM visibility, resolved from the sales-department flag (see my_crm_access()). */
+  crm?: CrmAccess;
+}
+
+export interface CrmAccess {
+  /** Sees the CRM at all (sales team, Super Admin, General Manager). */
+  hasAccess: boolean;
+  /** May create records (sales team, Super Admin). */
+  canWrite: boolean;
+  /** May edit or reassign anyone's records (sales leads, Super Admin). */
+  canManageAll: boolean;
+  isSalesMember: boolean;
 }
 
 export type EmploymentStatus =
@@ -53,6 +65,8 @@ export interface Department {
   openRoles: number;
   designations: string[];
   costCenter: string;
+  /** Sales team: members get the CRM (departments.is_sales). */
+  isSales?: boolean;
 }
 
 export type AttendanceStatus =

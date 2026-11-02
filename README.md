@@ -253,6 +253,13 @@ Keep the frontend clean and ready for Supabase integration.
 
 **Live app**: https://teamnest-phi.vercel.app
 
+## General Manager role & Sales CRM
+
+- **General Manager**: an account that reads every employee's daily work reports, KPIs and performance index across the organisation (new *Org Overview* page). It has no payroll or personal-record access and approves nothing outside its own team.
+- **Sales CRM**: leads, deals pipeline, accounts, contacts and activities, shown only to members of sales departments, Super Admin, and (read-only) the General Manager.
+
+Setup, permissions matrix and how it is enforced: [docs/GENERAL_MANAGER_AND_CRM.md](docs/GENERAL_MANAGER_AND_CRM.md).
+
 ## Development
 
 Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).

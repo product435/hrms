@@ -11,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { employeeService } from "@/services/employeeService";
+import { crmService } from "@/services/crmService";
+import { Switch } from "@/components/ui/switch";
 import { usePermissions } from "@/hooks/usePermissions";
 import {
   Dialog,
@@ -45,8 +47,9 @@ export const Route = createFileRoute("/departments")({
 });
 
 function DepartmentsPage() {
-  const { isHr, isSuperAdmin } = usePermissions();
-  const seesOrgHeadcount = isHr || isSuperAdmin;
+  const { isHr, isSuperAdmin, isGeneralManager } = usePermissions();
+  const seesOrgHeadcount = isHr || isSuperAdmin || isGeneralManager;
+  const canSetSalesTeam = isHr || isSuperAdmin;
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -69,6 +72,20 @@ function DepartmentsPage() {
     },
     onError: (e) =>
       toast.error("Could not create department", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+  const setSales = useMutation({
+    mutationFn: ({ id, isSales }: { id: string; isSales: boolean }) =>
+      crmService.setDepartmentSalesFlag(id, isSales),
+    onSuccess: (_data, { isSales }) => {
+      toast.success(isSales ? "Marked as a sales team" : "Removed from sales teams", {
+        description: "Members see the CRM after their next sign-in or page refresh.",
+      });
+      void queryClient.invalidateQueries({ queryKey: ["departments"] });
+    },
+    onError: (e) =>
+      toast.error("Could not change CRM access", {
         description: e instanceof Error ? e.message : "Supabase request failed.",
       }),
   });
@@ -134,6 +151,25 @@ function DepartmentsPage() {
                       <p className="font-display text-2xl font-bold">{dept.openRoles}</p>
                     </div>
                   </div>
+                  {canSetSalesTeam ? (
+                    <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+                      <Label htmlFor={`sales-${dept.id}`} className="text-sm">
+                        Sales team · CRM access
+                      </Label>
+                      <Switch
+                        id={`sales-${dept.id}`}
+                        checked={dept.isSales === true}
+                        disabled={setSales.isPending}
+                        onCheckedChange={(checked) =>
+                          setSales.mutate({ id: dept.id, isSales: checked })
+                        }
+                      />
+                    </div>
+                  ) : dept.isSales ? (
+                    <Badge className="mt-4" variant="outline">
+                      Sales team · CRM
+                    </Badge>
+                  ) : null}
                   <div className="mt-4 flex flex-wrap gap-1.5">
                     {dept.designations.slice(0, 4).map((title) => (
                       <Badge key={title} variant="secondary" className="font-normal">

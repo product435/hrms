@@ -35,6 +35,7 @@ const TARGET_OPTIONS: { value: AnnouncementTargetScope; label: string }[] = [
 ];
 const ROLE_LABELS: Record<Role, string> = {
   admin: "Admin",
+  general_manager: "General manager",
   hr: "HR",
   dept_head: "Department head",
   team_lead: "Team lead",

@@ -5,8 +5,8 @@ import { kraNavItem } from "@/lib/nav-fragments/kra";
 import { onboardingRouteRoles } from "@/lib/nav-fragments/onboarding";
 import { projectsNavItem } from "@/lib/nav-fragments/projects";
 import { workNavItem } from "@/lib/nav-fragments/work";
-import { ALL_ROLES, normalizeRole, STAFF_ROLES } from "@/lib/roles";
-import type { Role, SessionUser } from "@/types";
+import { ALL_ROLES, normalizeRole, ORG_OVERVIEW_ROLES, STAFF_ROLES } from "@/lib/roles";
+import type { CrmAccess, Role, SessionUser } from "@/types";
 import { isValidEmail, sanitizeEmail } from "@/lib/email";
 import { isStrongPassword } from "@/lib/password";
 import { logAudit } from "./api";
@@ -225,6 +225,44 @@ if (typeof window !== "undefined" && supabase) {
   });
 }
 
+const NO_CRM_ACCESS: CrmAccess = {
+  hasAccess: false,
+  canWrite: false,
+  canManageAll: false,
+  isSalesMember: false,
+};
+
+/**
+ * CRM visibility comes from the database (sales-department flag + role), not
+ * from the role alone. Any failure -- including a database where the CRM
+ * migration has not been applied yet -- means no CRM, never an error.
+ */
+async function crmAccessFor(client: SupabaseClientLike): Promise<CrmAccess> {
+  if (!client) return NO_CRM_ACCESS;
+  try {
+    const { data, error } = await (
+      client as unknown as {
+        rpc: (fn: string) => PromiseLike<{ data: unknown; error: unknown }>;
+      }
+    ).rpc("my_crm_access");
+    if (error || !data || typeof data !== "object") return NO_CRM_ACCESS;
+    const row = data as Record<string, unknown>;
+    return {
+      hasAccess: row["has_access"] === true,
+      canWrite: row["can_write"] === true,
+      canManageAll: row["can_manage_all"] === true,
+      isSalesMember: row["is_sales_member"] === true,
+    };
+  } catch {
+    return NO_CRM_ACCESS;
+  }
+}
+
+/** Paths that need CRM access on top of the role check. */
+export function requiresCrmAccess(pathname: string): boolean {
+  return pathname === "/crm" || pathname.startsWith("/crm/");
+}
+
 function writeSession(session: AuthSession | null) {
   currentSession = session;
   listeners.forEach((listener) => listener(session));
@@ -309,6 +347,7 @@ export async function sessionForUser(
     "JeeVijay HRMS user";
   const avatarUrl = profile.avatar_url ?? employee?.avatar_url;
   const employeeId = profile.employee_id ?? employee?.id ?? undefined;
+  const crm = await crmAccessFor(client);
   return {
     user: {
       id: user.id,
@@ -319,6 +358,7 @@ export async function sessionForUser(
       department: profile?.department ?? "",
       ...(avatarUrl ? { avatarUrl } : {}),
       ...(employeeId ? { employeeId } : {}),
+      crm,
     },
   };
 }
@@ -362,6 +402,8 @@ async function initializeSession() {
 
 export const ROUTE_ROLES: Record<string, Role[]> = {
   "/": ALL_ROLES,
+  "/org-overview": ORG_OVERVIEW_ROLES,
+  "/crm": ALL_ROLES,
   "/announcements": ALL_ROLES,
   "/notifications": ALL_ROLES,
   "/employees": STAFF_ROLES,

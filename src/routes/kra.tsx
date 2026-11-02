@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LineChart, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { BandLabel } from "@/components/common/BandLabel";
 import { IconAction } from "@/components/common/IconAction";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -43,22 +44,6 @@ const fieldClass =
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : "Try again.";
-}
-
-function bandClass(band: PerformanceBand) {
-  if (band === "Outstanding") return "bg-success/15 text-success";
-  if (band === "Exceeds") return "bg-info/15 text-info";
-  if (band === "Meets") return "bg-primary/10 text-primary";
-  if (band === "Needs Improvement") return "bg-warning/20 text-warning";
-  return "bg-muted text-muted-foreground";
-}
-
-function BandLabel({ band }: { band: PerformanceBand }) {
-  return (
-    <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-semibold ${bandClass(band)}`}>
-      {band}
-    </span>
-  );
 }
 
 function blankKpi(): KraTemplateDraft["kpis"][number] {
