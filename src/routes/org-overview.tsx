@@ -143,13 +143,14 @@ function OrgOverviewPage() {
     queryFn: () => orgOverviewService.workRollup(bounds.from, to),
   });
 
+  const workRows = useMemo(() => rollup.data?.rows ?? [], [rollup.data]);
   const people = useMemo(
-    () => mergePeople(board.data?.employees ?? [], rollup.data ?? []),
-    [board.data?.employees, rollup.data],
+    () => mergePeople(board.data?.employees ?? [], workRows),
+    [board.data?.employees, workRows],
   );
 
   const totals = useMemo(() => {
-    const work = rollup.data ?? [];
+    const work = workRows;
     const sum = (pick: (row: WorkReportRollupRow) => number) =>
       work.reduce((acc, row) => acc + pick(row), 0);
     const filed = sum((row) => row.submitted + row.late);
@@ -162,9 +163,12 @@ function OrgOverviewPage() {
       missed,
       late: sum((row) => row.late),
     };
-  }, [people, rollup.data]);
+  }, [people, workRows]);
 
   const loading = board.isLoading || rollup.isLoading;
+  // KPI data and work-report counts load independently: one failing never
+  // blanks the other. Both failing is the only full error state.
+  const bothFailed = board.isError && rollup.isError;
 
   return (
     <AppLayout>
@@ -229,6 +233,26 @@ function OrgOverviewPage() {
         </div>
       )}
 
+      {!bothFailed && (board.isError || rollup.isError) ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm"
+        >
+          <span>
+            {board.isError
+              ? `KPI scores could not be loaded: ${errorText(board.error)} Work-report counts are shown.`
+              : `Work-report counts could not be loaded: ${errorText(rollup.error)} KPI scores are shown.`}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void (board.isError ? board.refetch() : rollup.refetch())}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : null}
+
       <Tabs value={tab} onValueChange={setTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="people">People &amp; KPIs</TabsTrigger>
@@ -240,7 +264,7 @@ function OrgOverviewPage() {
           <PeopleTable
             rows={people}
             isLoading={loading}
-            isError={board.isError || rollup.isError}
+            isError={bothFailed}
             error={board.error ?? rollup.error}
             onRetry={() => {
               void board.refetch();

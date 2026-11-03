@@ -151,7 +151,7 @@ function DepartmentsPage() {
                       <p className="font-display text-2xl font-bold">{dept.openRoles}</p>
                     </div>
                   </div>
-                  {canSetSalesTeam ? (
+                  {canSetSalesTeam && dept.isSales !== undefined ? (
                     <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
                       <Label htmlFor={`sales-${dept.id}`} className="text-sm">
                         Sales team · CRM access

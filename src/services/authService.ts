@@ -9,6 +9,11 @@ import { ALL_ROLES, normalizeRole, ORG_OVERVIEW_ROLES, STAFF_ROLES } from "@/lib
 import type { CrmAccess, Role, SessionUser } from "@/types";
 import { isValidEmail, sanitizeEmail } from "@/lib/email";
 import { isStrongPassword } from "@/lib/password";
+import {
+  isDbObjectKnownMissing,
+  isMissingDbObject,
+  markDbObjectMissing,
+} from "@/lib/schema-features";
 import { logAudit } from "./api";
 
 // Supabase auth errors carry a machine-readable `code` in current supabase-js
@@ -237,25 +242,53 @@ const NO_CRM_ACCESS: CrmAccess = {
  * from the role alone. Any failure -- including a database where the CRM
  * migration has not been applied yet -- means no CRM, never an error.
  */
-async function crmAccessFor(client: SupabaseClientLike): Promise<CrmAccess> {
+// Browser-only memo: the route guard resolves the session on every
+// navigation, and CRM access only changes when an admin flips a department,
+// which the app already says takes effect on the next page load. Never
+// cached on the server, where one process serves many users.
+const crmAccessCache = new Map<string, CrmAccess>();
+let crmFunctionMissing = false;
+
+async function crmAccessFor(client: SupabaseClientLike, userId: string): Promise<CrmAccess> {
   if (!client) return NO_CRM_ACCESS;
+  const inBrowser = typeof window !== "undefined";
+  if (inBrowser) {
+    if (crmFunctionMissing || isDbObjectKnownMissing("my_crm_access")) return NO_CRM_ACCESS;
+    const cached = crmAccessCache.get(userId);
+    if (cached) return cached;
+  }
   try {
     const { data, error } = await (
       client as unknown as {
         rpc: (fn: string) => PromiseLike<{ data: unknown; error: unknown }>;
       }
     ).rpc("my_crm_access");
-    if (error || !data || typeof data !== "object") return NO_CRM_ACCESS;
+    if (error) {
+      // Not installed yet: stop asking for the rest of this page load.
+      if (inBrowser && isMissingDbObject(error)) {
+        crmFunctionMissing = true;
+        markDbObjectMissing("my_crm_access");
+      }
+      return NO_CRM_ACCESS;
+    }
+    if (!data || typeof data !== "object") return NO_CRM_ACCESS;
     const row = data as Record<string, unknown>;
-    return {
+    const access: CrmAccess = {
       hasAccess: row["has_access"] === true,
       canWrite: row["can_write"] === true,
       canManageAll: row["can_manage_all"] === true,
       isSalesMember: row["is_sales_member"] === true,
     };
+    if (inBrowser) crmAccessCache.set(userId, access);
+    return access;
   } catch {
     return NO_CRM_ACCESS;
   }
+}
+
+/** Forget memoised CRM access (sign-in / sign-out). */
+function clearCrmAccessCache() {
+  crmAccessCache.clear();
 }
 
 /** Paths that need CRM access on top of the role check. */
@@ -347,7 +380,7 @@ export async function sessionForUser(
     "JeeVijay HRMS user";
   const avatarUrl = profile.avatar_url ?? employee?.avatar_url;
   const employeeId = profile.employee_id ?? employee?.id ?? undefined;
-  const crm = await crmAccessFor(client);
+  const crm = await crmAccessFor(client, user.id);
   return {
     user: {
       id: user.id,
@@ -457,6 +490,7 @@ export const authService = {
     return () => listeners.delete(listener);
   },
   async signIn(email: string, password: string): Promise<{ error?: AuthError }> {
+    clearCrmAccessCache();
     if (!isSupabaseConfigured || !supabase)
       return {
         error: {
@@ -565,6 +599,7 @@ export const authService = {
   async signOut(options?: {
     scope?: "global" | "local" | "others";
   }): Promise<{ error?: AuthError }> {
+    clearCrmAccessCache();
     if (signOutPromise) return signOutPromise;
     const scope = options?.scope;
 

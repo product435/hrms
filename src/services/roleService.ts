@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { normalizeRole } from "@/lib/roles";
+import { gmRoleUnavailableMessage } from "@/lib/schema-features";
 import type { Role } from "@/types";
 import type { DwrItem, DwrItemStatus, DwrReviewStatus, DwrStatus } from "@/types/work";
 
@@ -285,6 +286,8 @@ export const roleService = {
       p_employee_id: employeeId,
       p_role: role,
     });
+    const unavailable = gmRoleUnavailableMessage(role, error);
+    if (unavailable) throw new Error(unavailable);
     fail(error);
   },
 

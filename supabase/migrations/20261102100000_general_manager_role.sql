@@ -12,9 +12,10 @@
 --
 -- What a General Manager cannot do (unchanged admin/HR-only or self-only data):
 --   * Payroll, salary structures, payslips.
---   * Personal records: documents + document storage, bank accounts, addresses,
---     emergency contacts, family, education, experience, identity.
---   * Expense claims and helpdesk tickets of people outside their lead scope.
+--   * Personal records: bank accounts, addresses, emergency contacts, family,
+--     education, experience (moved to can_view_employee_scoped below), and
+--     documents, identity, expense claims and helpdesk tickets (their policies
+--     never used can_view_employee, so they are untouched).
 --   * Approve / review / edit records of people outside their lead scope:
 --     can_manage_employee() keeps the original lead scope and never grants
 --     org-wide write access to a General Manager.
@@ -169,29 +170,10 @@ grant execute on function public.can_manage_employee(uuid) to authenticated, ser
 -- 3. Personal records stay on the scoped rule
 -- ------------------------------------------------------------
 
-drop policy if exists documents_manager_view_team on public.documents;
-create policy documents_manager_view_team on public.documents
-  for select
-  using (
-    public.can_view_employee_scoped(employee_id)
-    and coalesce(category, '') not in ('Identity', 'Bank', 'KYC')
-  );
-
-drop policy if exists employee_documents_manager_select on storage.objects;
-create policy employee_documents_manager_select on storage.objects
-  for select to authenticated
-  using (
-    bucket_id = 'documents'
-    and split_part(name, '/', 2) not in ('kyc', 'bank')
-    and exists (
-      select 1
-      from public.employees e
-      where e.id::text = split_part(name, '/', 1)
-        and public.can_view_employee_scoped(e.id)
-        and e.id is distinct from public.current_employee_id()
-    )
-  );
-
+-- Documents (table + storage), expense claims and helpdesk tickets are left
+-- exactly as they are live: those policies are keyed on direct reports
+-- (is_my_direct_report / manager_id), not can_view_employee, so the General
+-- Manager's org-wide read never reaches them.
 drop policy if exists emergency_contacts_lead_select on public.emergency_contacts;
 create policy emergency_contacts_lead_select on public.emergency_contacts
   for select using (public.can_view_employee_scoped(employee_id));
@@ -215,16 +197,6 @@ create policy employee_experience_lead_select on public.employee_experience
 drop policy if exists employee_family_lead_select on public.employee_family_members;
 create policy employee_family_lead_select on public.employee_family_members
   for select using (public.can_view_employee_scoped(employee_id));
-
-drop policy if exists helpdesk_tickets_lead_select on public.helpdesk_tickets;
-create policy helpdesk_tickets_lead_select on public.helpdesk_tickets
-  for select
-  using (public.can_view_employee_scoped(employee_id));
-
-drop policy if exists expense_claims_manager_view_team on public.expense_claims;
-create policy expense_claims_manager_view_team on public.expense_claims
-  for select
-  using (public.can_view_employee_scoped(employee_id));
 
 -- ------------------------------------------------------------
 -- 4. Org-wide reads that were admin/HR-only by role name

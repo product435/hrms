@@ -27,6 +27,7 @@ import type {
   ProfileChangeRequestItem,
 } from "@/types/onboarding";
 import { emptyAddress, emptyOnboardingForm } from "@/lib/onboarding-schema";
+import { gmRoleUnavailableMessage } from "@/lib/schema-features";
 
 const db = supabase as unknown as {
   from: (table: string) => any;
@@ -696,6 +697,8 @@ export const onboardingService = {
       p_employee_code: input.employeeCode.trim() || null,
       p_override_joining_date_reason: input.overrideJoiningDateReason.trim() || null,
     });
+    const unavailable = gmRoleUnavailableMessage(input.role, error);
+    if (unavailable) throw new Error(unavailable);
     if (error) fail(error);
   },
 

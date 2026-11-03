@@ -433,7 +433,8 @@ export const employeeService = {
           openRoles: 0,
           designations: [...rowDesignations],
           costCenter: "",
-          isSales: row.is_sales === true,
+          // Left out when the sales-CRM migration is not applied (no column yet).
+          ...(row.is_sales === undefined ? {} : { isSales: row.is_sales === true }),
         });
       }
     });

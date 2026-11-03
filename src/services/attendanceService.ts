@@ -281,19 +281,17 @@ async function readPolicy(organizationId: string): Promise<AttendancePolicy> {
     halfDayHours: DEFAULT_HALF_DAY_HOURS,
     regularizationMonthlyLimit: DEFAULT_REGULARIZATION_LIMIT,
   };
-  const primary = await db
+  // select("*") instead of naming attendance_policy: on databases where the
+  // attendance-rules migration skipped that column, naming it is a 400.
+  const { data, error } = await db
     .from("organization_settings")
-    .select("attendance_policy")
+    .select("*")
     .eq("organization_id", organizationId)
     .maybeSingle();
-  if (!primary.error) return parsePolicy(primary.data?.attendance_policy, defaults);
-
-  const secondary = await db
-    .from("organization_settings")
-    .select("payroll_settings")
-    .eq("organization_id", organizationId)
-    .maybeSingle();
-  if (!secondary.error) return parsePolicy(secondary.data?.payroll_settings, defaults);
+  if (error || !data) return defaults;
+  const row = data as { attendance_policy?: unknown; payroll_settings?: unknown };
+  if (row.attendance_policy != null) return parsePolicy(row.attendance_policy, defaults);
+  if (row.payroll_settings != null) return parsePolicy(row.payroll_settings, defaults);
   return defaults;
 }
 
