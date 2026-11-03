@@ -49,13 +49,45 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
+      return withSecurityHeaders(
+        new Response(renderErrorPage(), {
+          status: 500,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+      );
     }
   },
 };
+
+/**
+ * Baseline security headers on every server response.
+ *
+ * No X-Frame-Options: it cannot allow-list, and the Lovable editor previews the
+ * app in an iframe. `frame-ancestors` does the same job (clickjacking) while
+ * keeping that preview working. A full script/connect CSP is left out on
+ * purpose: SSR hydration uses inline scripts, so it needs nonces first.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(self), geolocation=(self), payment=(), usb=()",
+  "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+  "Content-Security-Policy":
+    "frame-ancestors 'self' https://lovable.dev https://*.lovable.dev https://*.lovable.app; base-uri 'self'; object-src 'none'",
+};
+
+function withSecurityHeaders(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+    if (!headers.has(name)) headers.set(name, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
