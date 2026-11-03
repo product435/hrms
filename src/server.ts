@@ -49,10 +49,11 @@ export default {
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return withSecurityHeaders(await normalizeCatastrophicSsrResponse(response));
+      return withSecurityHeaders(request, await normalizeCatastrophicSsrResponse(response));
     } catch (error) {
       console.error(error);
       return withSecurityHeaders(
+        request,
         new Response(renderErrorPage(), {
           status: 500,
           headers: { "content-type": "text/html; charset=utf-8" },
@@ -65,9 +66,10 @@ export default {
 /**
  * Baseline security headers on every server response.
  *
- * No X-Frame-Options: it cannot allow-list, and the Lovable editor previews the
- * app in an iframe. `frame-ancestors` does the same job (clickjacking) while
- * keeping that preview working. A full script/connect CSP is left out on
+ * Clickjacking: production may only be framed by itself. Lovable preview
+ * hosts (*.lovable.app / *.lovableproject.com) may also be framed by the
+ * Lovable editor on lovable.dev. Never allow-list *.lovable.app as a parent:
+ * anyone can publish a page there. A full script/connect CSP is left out on
  * purpose: SSR hydration uses inline scripts, so it needs nonces first.
  */
 const SECURITY_HEADERS: Record<string, string> = {
@@ -76,13 +78,29 @@ const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(self), geolocation=(self), payment=(), usb=()",
   "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
-  "Content-Security-Policy":
-    "frame-ancestors 'self' https://lovable.dev https://*.lovable.dev https://*.lovable.app; base-uri 'self'; object-src 'none'",
 };
 
-function withSecurityHeaders(response: Response): Response {
+const LOVABLE_PREVIEW_HOST = /\.(lovable\.app|lovableproject\.com)$/i;
+
+function frameAncestors(request: Request): string {
+  let host = "";
+  try {
+    host = new URL(request.url).hostname;
+  } catch {
+    // fall through to the strict policy
+  }
+  return LOVABLE_PREVIEW_HOST.test(host)
+    ? "'self' https://lovable.dev https://*.lovable.dev"
+    : "'self'";
+}
+
+function withSecurityHeaders(request: Request, response: Response): Response {
   const headers = new Headers(response.headers);
-  for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+  const policy = `frame-ancestors ${frameAncestors(request)}; base-uri 'self'; object-src 'none'`;
+  for (const [name, value] of Object.entries({
+    ...SECURITY_HEADERS,
+    "Content-Security-Policy": policy,
+  })) {
     if (!headers.has(name)) headers.set(name, value);
   }
   return new Response(response.body, {
