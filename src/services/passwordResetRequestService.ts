@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Supabase joins are not in the generated row types. */
+import { isStrongPassword } from "@/lib/password";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import type { PasswordResetRequest } from "@/types";
 import { authService, passwordRecoveryRedirect } from "./authService";
@@ -81,6 +82,20 @@ export const passwordResetRequestService = {
         approved_at: new Date().toISOString(),
       })
       .eq("id", id);
+    if (error) throw error;
+  },
+  // Super Admin only. The database hashes the password, revokes that
+  // person's sessions, and never returns the password.
+  async setEmployeePassword(employeeId: string, password: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    if (!employeeId) throw new Error("Choose an employee.");
+    if (!isStrongPassword(password) || password.length > 72) {
+      throw new Error("Password does not meet the requirements.");
+    }
+    const { error } = await supabase.rpc("admin_set_employee_password", {
+      p_employee_id: employeeId,
+      p_password: password,
+    });
     if (error) throw error;
   },
   // Called from the authenticated recovery session right after a

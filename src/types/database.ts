@@ -2393,6 +2393,10 @@ export type Database = {
         };
         Returns: string;
       };
+      admin_set_employee_password: {
+        Args: { p_employee_id: string; p_password: string };
+        Returns: undefined;
+      };
       complete_password_reset_request: { Args: never; Returns: undefined };
       create_employee_complaint: {
         Args: {

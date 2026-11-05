@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Eye, UserPlus } from "lucide-react";
+import { Download, Eye, KeyRound, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { IconAction } from "@/components/common/IconAction";
 import { BLOOD_GROUPS } from "@/lib/onboarding-schema";
@@ -12,6 +12,7 @@ import { DataTable, type Column } from "@/components/common/DataTable";
 import { FilterBar } from "@/components/common/FilterBar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { SetEmployeePasswordDialog } from "@/components/auth/SetEmployeePasswordDialog";
 import { employeeService } from "@/services/employeeService";
 import { usePermissions } from "@/hooks/usePermissions";
 import { indiaDateKey, initialsOf, shortDate } from "@/lib/format";
@@ -53,8 +54,9 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [status, setStatus] = useState("all");
-  const { role, user, isLoading, isTeamLead } = usePermissions();
+  const { role, user, isLoading, isTeamLead, isSuperAdmin } = usePermissions();
   const canChangeStatus = role === "admin" || role === "hr";
+  const [passwordEmployee, setPasswordEmployee] = useState<Employee | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [lifecycle, setLifecycle] = useState<{
     employee: Employee;
@@ -263,6 +265,15 @@ function EmployeesPage() {
                 {row.status === "terminated" ? <option value="reinstate">Reinstate</option> : null}
               </select>
             ) : null}
+            {isSuperAdmin && row.id !== user.employeeId ? (
+              <IconAction
+                label={`Set password for ${row.firstName} ${row.lastName}`}
+                variant="ghost"
+                onClick={() => setPasswordEmployee(row)}
+              >
+                <KeyRound />
+              </IconAction>
+            ) : null}
             <IconAction
               label={`View ${row.firstName} ${row.lastName}'s profile`}
               variant="ghost"
@@ -276,7 +287,7 @@ function EmployeesPage() {
         ),
       },
     ],
-    [canChangeStatus, navigate, user.employeeId],
+    [canChangeStatus, isSuperAdmin, navigate, setPasswordEmployee, user.employeeId],
   );
 
   return (
@@ -522,6 +533,18 @@ function EmployeesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SetEmployeePasswordDialog
+        employeeId={passwordEmployee?.id ?? null}
+        employeeName={
+          passwordEmployee
+            ? `${passwordEmployee.firstName} ${passwordEmployee.lastName}`
+            : "this employee"
+        }
+        open={passwordEmployee !== null}
+        onOpenChange={(open) => {
+          if (!open) setPasswordEmployee(null);
+        }}
+      />
     </AppLayout>
   );
 }

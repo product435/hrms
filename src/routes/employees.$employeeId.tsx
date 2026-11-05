@@ -19,6 +19,7 @@ import { Field } from "@/components/employees/Field";
 import { LeaveTab } from "@/components/employees/LeaveTab";
 import { PerformanceTab } from "@/components/employees/PerformanceTab";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
+import { SetEmployeePasswordDialog } from "@/components/auth/SetEmployeePasswordDialog";
 import { MobileInput } from "@/components/common/MobileInput";
 import { PersonalTab } from "@/components/employees/PersonalTab";
 import { Button } from "@/components/ui/button";
@@ -164,6 +165,7 @@ function EmployeeDetailPage() {
   const canChangeEmploymentStatus = canEditHrFields && !isOwnProfile;
 
   const [editOpen, setEditOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [lifecycle, setLifecycle] = useState<
     null | "suspend" | "terminate" | "activate" | "reinstate"
   >(null);
@@ -486,6 +488,11 @@ function EmployeeDetailPage() {
                 Reinstate
               </Button>
             ) : null}
+            {isSuperAdmin && !isOwnProfile ? (
+              <Button variant="outline" onClick={() => setPasswordOpen(true)}>
+                Set password
+              </Button>
+            ) : null}
             {canEditProfile ? (
               <Button variant="outline" onClick={openEdit}>
                 Edit profile
@@ -569,6 +576,13 @@ function EmployeeDetailPage() {
           />
         </Tabs>
       </div>
+
+      <SetEmployeePasswordDialog
+        employeeId={employeeId}
+        employeeName={fullName}
+        open={passwordOpen}
+        onOpenChange={setPasswordOpen}
+      />
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
