@@ -17,6 +17,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { kraService } from "@/services/kraService";
+import { talentService } from "@/services/talentService";
+import { percent, shortDate } from "@/lib/format";
 import {
   KPI_SOURCE_LABELS,
   STANDARD_KRA_SET,
@@ -803,6 +805,19 @@ function ScoresPanel({
     enabled: Boolean(selectedId),
   });
 
+  // Goals linked to the selected employee's KRAs -- "supporting achievement
+  // information" per the task's connect-goals-to-KRA requirement. Read-only
+  // here; editing a goal stays on the Goals page.
+  const employeeGoals = useQuery({
+    queryKey: ["goals-of", selectedId],
+    queryFn: () => talentService.goalsOf(selectedId),
+    enabled: Boolean(selectedId),
+  });
+  const kraIdsInGrid = new Set(rows.map((row) => row.kraTemplateId));
+  const linkedGoals = (employeeGoals.data ?? []).filter(
+    (goal) => goal.kraId && kraIdsInGrid.has(goal.kraId),
+  );
+
   const calculate = useMutation({
     mutationFn: () => kraService.compute(period),
     onSuccess: (count) => {
@@ -1003,6 +1018,31 @@ function ScoresPanel({
             })}
           </tbody>
         </table>
+      </SectionCard>
+
+      <SectionCard
+        title="Linked goals"
+        description="Goal progress linked to these KRAs, as supporting achievement information. Goal progress does not automatically become a KPI score."
+      >
+        {employeeGoals.isLoading ? (
+          <p className="text-xs text-muted-foreground">Loading…</p>
+        ) : linkedGoals.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No goals are linked to this month's KRAs.</p>
+        ) : (
+          <ul className="space-y-2">
+            {linkedGoals.map((goal) => (
+              <li key={goal.id} className="rounded-md border border-border px-3 py-2 text-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium">{goal.title}</span>
+                  <span className="text-xs text-muted-foreground">{percent(goal.progress)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {goal.kraName} · Due {shortDate(goal.dueDate)} · {goal.status}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
       </SectionCard>
     </div>
   );

@@ -96,19 +96,36 @@ function PerformancePage() {
   const [cycleOpen, setCycleOpen] = useState(false);
   const [cycleName, setCycleName] = useState("");
   const [selectedEmployees, setSelectedEmployees] = useState<Set<string>>(new Set());
+  const [cycleDesignationId, setCycleDesignationId] = useState("");
+  const [cyclePeriodStart, setCyclePeriodStart] = useState("");
+  const [cyclePeriodEnd, setCyclePeriodEnd] = useState("");
   const employees = useQuery({
     queryKey: ["employees", "all-for-cycle"],
     queryFn: () => employeeService.list(),
     enabled: cycleOpen,
   });
+  const catalog = useQuery({
+    queryKey: ["kra-catalog"],
+    queryFn: () => kraService.catalog(),
+    enabled: cycleOpen,
+  });
   const createCycle = useMutation({
     mutationFn: () =>
-      talentService.createReviewCycle({ cycleName, employeeIds: [...selectedEmployees] }),
-    onSuccess: () => {
-      toast.success("Review cycle created");
+      talentService.createReviewCycle({
+        cycleName,
+        employeeIds: [...selectedEmployees],
+        designationId: cycleDesignationId || null,
+        periodStart: cyclePeriodStart || null,
+        periodEnd: cyclePeriodEnd || null,
+      }),
+    onSuccess: (count) => {
+      toast.success("Review cycle created", { description: `${count} review(s) created.` });
       setCycleOpen(false);
       setCycleName("");
       setSelectedEmployees(new Set());
+      setCycleDesignationId("");
+      setCyclePeriodStart("");
+      setCyclePeriodEnd("");
       void queryClient.invalidateQueries({ queryKey: ["performance-reviews"] });
     },
     onError: (e) =>
@@ -353,6 +370,16 @@ function PerformancePage() {
                         period={kraPeriod}
                       />
                     </div>
+                    {row.selfFeedback ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Self feedback: {row.selfFeedback}
+                      </p>
+                    ) : null}
+                    {row.managerFeedback ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Manager feedback: {row.managerFeedback}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <StatusBadge status={row.status} />
@@ -417,6 +444,39 @@ function PerformancePage() {
                 {employees.isLoading ? (
                   <p className="px-2 py-1.5 text-xs text-muted-foreground">Loading…</p>
                 ) : null}
+              </div>
+            </div>
+            <div>
+              <Label>Or every employee in a designation (optional)</Label>
+              <select
+                className="mt-1 flex h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                value={cycleDesignationId}
+                onChange={(e) => setCycleDesignationId(e.target.value)}
+              >
+                <option value="">None</option>
+                {(catalog.data?.designations ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Period start (optional)</Label>
+                <Input
+                  type="date"
+                  value={cyclePeriodStart}
+                  onChange={(e) => setCyclePeriodStart(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Period end (optional)</Label>
+                <Input
+                  type="date"
+                  value={cyclePeriodEnd}
+                  onChange={(e) => setCyclePeriodEnd(e.target.value)}
+                />
               </div>
             </div>
           </div>

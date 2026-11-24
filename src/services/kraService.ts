@@ -187,6 +187,31 @@ export const kraService = {
     });
   },
 
+  /**
+   * KRAs actually assigned to one employee for one month -- the explicit
+   * assignment if one exists, otherwise the most specific
+   * designation/department default (same resolution rule the scoring RPCs
+   * already use). Used by the Goal form's KRA link dropdown, so an
+   * employee can only link a goal to a KRA that is actually theirs (task
+   * requirement #2), never every template in the organisation.
+   */
+  async resolvedTemplates(
+    employeeId: string,
+    period: string,
+  ): Promise<{ id: string; name: string; weightage: number }[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await db().rpc("kra_resolved_templates", {
+      p_employee_id: employeeId,
+      p_period: period,
+    });
+    fail(error);
+    return (data ?? []).map((row: KraRow) => ({
+      id: text(row, "template_id"),
+      name: text(row, "template_name"),
+      weightage: num(row["weightage"]) ?? 0,
+    }));
+  },
+
   async saveTemplateSet(input: {
     departmentId: string | null;
     designationId: string | null;

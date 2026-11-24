@@ -84,19 +84,36 @@ export const passwordResetRequestService = {
       .eq("id", id);
     if (error) throw error;
   },
-  // Super Admin only. The database hashes the password, revokes that
-  // person's sessions, and never returns the password.
+  // Super Admin only. Routed through the admin-set-employee-password Edge
+  // Function (not the admin_set_employee_password RPC directly) because
+  // that function also creates the employee's Supabase Auth account first
+  // when one doesn't exist yet -- e.g. an employee added via "Add
+  // employee" who has never signed up. For an employee who already has an
+  // account, behavior is unchanged: the Edge Function still ends by
+  // calling the same RPC, which hashes the password, revokes sessions, and
+  // never returns the password.
   async setEmployeePassword(employeeId: string, password: string): Promise<void> {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
     if (!employeeId) throw new Error("Choose an employee.");
     if (!isStrongPassword(password) || password.length > 72) {
       throw new Error("Password does not meet the requirements.");
     }
-    const { error } = await supabase.rpc("admin_set_employee_password", {
-      p_employee_id: employeeId,
-      p_password: password,
+    const { data, error } = await supabase.functions.invoke("admin-set-employee-password", {
+      body: { employee_id: employeeId, password },
     });
-    if (error) throw error;
+    if (error) {
+      const context = (error as { context?: unknown }).context;
+      if (context instanceof Response) {
+        try {
+          const body = (await context.clone().json()) as { error?: string };
+          if (body?.error) throw new Error(body.error);
+        } catch {
+          /* fall through to the generic error below */
+        }
+      }
+      throw error;
+    }
+    if (data?.error) throw new Error(String(data.error));
   },
   // Called from the authenticated recovery session right after a
   // successful password update, so the request's lifecycle actually

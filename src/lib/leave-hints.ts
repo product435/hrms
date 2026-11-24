@@ -1,5 +1,5 @@
 export const HOW_LEAVE_WORKS =
-  "At most 2 leave days are allowed in a calendar month, no matter the type. Casual, Earned, and Sick yearly allocations still apply on top of that monthly cap. The balance resets each calendar year.";
+  "Leave is deducted from your leave balance. Casual, Earned, and Sick yearly allocations still apply. The balance resets each calendar year.";
 
 export function leaveTypeHint(name: string) {
   const key = name.trim().toLowerCase();
@@ -12,5 +12,5 @@ export function leaveTypeHint(name: string) {
   if (key.includes("sick")) {
     return "Sick leave is for illness. Its yearly allocation still applies, and the balance resets each calendar year.";
   }
-  return "This type keeps its own yearly allocation, and the balance resets each calendar year. At most 2 leave days are allowed in a calendar month across every type.";
+  return "This type keeps its own yearly allocation, and the balance resets each calendar year.";
 }

@@ -574,7 +574,6 @@ export const attendanceService = {
 
   async checkOut(employeeId: string, source: AttendanceRecord["source"] = "web") {
     const resolved = await requireEmployeeId(employeeId);
-    await assertCheckoutAllowed(resolved);
     return this.punch(resolved, "check_out", source);
   },
 

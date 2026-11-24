@@ -996,6 +996,14 @@ export const onboardingJourneys: OnboardingJourney[] = [
   },
 ];
 
+const goalDefaults = {
+  kraId: null,
+  kraName: null,
+  progressRemarks: "",
+  managerReviewReason: "",
+  reviewedAt: null,
+} as const;
+
 export const goals: Goal[] = [
   {
     id: "g1",
@@ -1006,6 +1014,7 @@ export const goals: Goal[] = [
     weight: 30,
     dueDate: "2026-09-30",
     status: "on-track",
+    ...goalDefaults,
   },
   {
     id: "g2",
@@ -1016,6 +1025,7 @@ export const goals: Goal[] = [
     weight: 25,
     dueDate: "2026-10-15",
     status: "at-risk",
+    ...goalDefaults,
   },
   {
     id: "g3",
@@ -1026,6 +1036,7 @@ export const goals: Goal[] = [
     weight: 20,
     dueDate: "2026-08-31",
     status: "on-track",
+    ...goalDefaults,
   },
   {
     id: "g4",
@@ -1036,6 +1047,7 @@ export const goals: Goal[] = [
     weight: 40,
     dueDate: "2026-09-30",
     status: "delayed",
+    ...goalDefaults,
   },
   {
     id: "g5",
@@ -1046,8 +1058,16 @@ export const goals: Goal[] = [
     weight: 25,
     dueDate: "2026-07-31",
     status: "completed",
+    ...goalDefaults,
   },
 ];
+
+const reviewDefaults = {
+  selfFeedback: "",
+  managerFeedback: "",
+  periodStart: null,
+  periodEnd: null,
+} as const;
 
 export const performanceReviews: PerformanceReview[] = [
   {
@@ -1059,6 +1079,7 @@ export const performanceReviews: PerformanceReview[] = [
     managerScore: 4.0,
     finalRating: 4.1,
     status: "closed",
+    ...reviewDefaults,
   },
   {
     id: "pr2",
@@ -1069,6 +1090,7 @@ export const performanceReviews: PerformanceReview[] = [
     managerScore: 4.1,
     finalRating: 4.0,
     status: "submitted",
+    ...reviewDefaults,
   },
   {
     id: "pr3",
@@ -1079,6 +1101,7 @@ export const performanceReviews: PerformanceReview[] = [
     managerScore: 3.0,
     finalRating: 3.2,
     status: "in-progress",
+    ...reviewDefaults,
   },
   {
     id: "pr4",
@@ -1089,6 +1112,7 @@ export const performanceReviews: PerformanceReview[] = [
     managerScore: 0,
     finalRating: 0,
     status: "not-started",
+    ...reviewDefaults,
   },
 ];
 

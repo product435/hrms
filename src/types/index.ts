@@ -246,6 +246,11 @@ export interface Goal {
   weight: number;
   dueDate: string;
   status: "on-track" | "at-risk" | "delayed" | "completed";
+  kraId: string | null;
+  kraName: string | null;
+  progressRemarks: string;
+  managerReviewReason: string;
+  reviewedAt: string | null;
 }
 
 export interface PerformanceReview {
@@ -259,6 +264,10 @@ export interface PerformanceReview {
   managerScore: number | null;
   finalRating: number | null;
   status: "not-started" | "in-progress" | "submitted" | "closed" | "completed";
+  selfFeedback: string;
+  managerFeedback: string;
+  periodStart: string | null;
+  periodEnd: string | null;
 }
 
 export interface DocumentItem {

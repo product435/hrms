@@ -145,7 +145,7 @@ function rejectDescriptionDrop(event: DragEvent<HTMLInputElement>) {
 
 function phaseCopy(phase: SubmitPhase, opensAt: Date, closesAt: Date) {
   if (phase === "before-window") {
-    return `Drafts can be saved now. Submit opens at ${indianTime(opensAt)} IST, 30 minutes before your shift ends.`;
+    return "Drafts can be saved now. You can submit anytime.";
   }
   if (phase === "on-time")
     return "The submission window is open. A report submitted now is on time.";
@@ -585,12 +585,6 @@ function ReportsPanel() {
     (report) => report.employeeId === me && report.reportDate === reportDate,
   );
   const locked = existing?.reviewStatus === "approved" || existing?.status === "missed";
-  const gate = useQuery({
-    queryKey: ["work", "checkout", me, reportDate],
-    queryFn: () => workService.checkoutAllowed(me, reportDate),
-    enabled: Boolean(me && /^\d{4}-\d{2}-\d{2}$/.test(reportDate)),
-  });
-
   useEffect(() => {
     form.setValue("linkTasks", openTasks.length > 0);
   }, [form, openTasks.length]);
@@ -653,9 +647,7 @@ function ReportsPanel() {
       toast.error("Could not submit the report", { description: messageOf(error) }),
   });
 
-  const canSubmit =
-    !locked &&
-    (phase === "on-time" || phase === "late" || existing?.reviewStatus === "needs-revision");
+  const canSubmit = !locked;
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
@@ -691,16 +683,6 @@ function ReportsPanel() {
             <div className="grid gap-1.5">
               <Label htmlFor="report-date">Report date</Label>
               <Input id="report-date" type="date" {...form.register("reportDate")} />
-            </div>
-            <div className="rounded-md border px-3 py-2 text-sm">
-              <p className="font-medium">Check-out</p>
-              <p className="text-muted-foreground">
-                {gate.isLoading
-                  ? "Checking today's report…"
-                  : gate.data?.allowed
-                    ? "Check-out is allowed for this date."
-                    : (gate.data?.reason ?? "Submit the report before check-out.")}
-              </p>
             </div>
           </div>
           {openTasks.length > 0 ? (

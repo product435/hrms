@@ -14,8 +14,20 @@ function emergencyContactLabel(contact: Employee["emergencyContact"]) {
   return `${name} (${relation})`;
 }
 
-export function PersonalTab({ employee, footer }: { employee: Employee; footer?: ReactNode }) {
-  const profileIncomplete = employee.dateOfBirth.trim() === "";
+export function PersonalTab({
+  employee,
+  footer,
+  isOwnProfile,
+}: {
+  employee: Employee;
+  footer?: ReactNode;
+  isOwnProfile: boolean;
+}) {
+  // "Finish your profile" only makes sense when you're looking at your own
+  // profile in the employee portal -- an admin viewing someone else's
+  // profile should just see the fields as they are, "—" and all, never a
+  // prompt to go finish something that isn't theirs to finish.
+  const profileIncomplete = isOwnProfile && employee.dateOfBirth.trim() === "";
 
   return (
     <TabsContent value="personal" className="mt-4 space-y-4">

@@ -1,8 +1,12 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { isMissingDbObject } from "@/lib/schema-features";
+import { whatsappProvider } from "@/lib/whatsapp-provider";
 import {
   ACTIVITY_STATUSES,
   ACTIVITY_TYPES,
+  CALL_OUTCOMES,
   DEAL_STAGES,
+  DEMO_STATUSES,
   LEAD_RATINGS,
   LEAD_SOURCES,
   LEAD_STATUSES,
@@ -10,15 +14,21 @@ import {
   type ActivityInput,
   type ActivityStatus,
   type ActivityType,
+  type CallLogInput,
+  type CallOutcome,
   type ContactInput,
   type CrmAccount,
   type CrmActivity,
+  type CrmCallLog,
   type CrmContact,
   type CrmDeal,
   type CrmLead,
   type CrmOwner,
+  type CrmWhatsappConversation,
+  type CrmWhatsappMessage,
   type DealInput,
   type DealStage,
+  type DemoStatus,
   type LeadInput,
   type LeadRating,
   type LeadSource,
@@ -33,9 +43,10 @@ import {
  */
 
 type LooseRow = Record<string, unknown>;
+type DbError = { message?: string; code?: string } | null;
 interface QueryResult {
   data: unknown;
-  error: { message?: string } | null;
+  error: DbError;
 }
 /* eslint-disable @typescript-eslint/no-explicit-any -- CRM tables are newer than the generated Database types */
 type Db = {
@@ -51,7 +62,7 @@ function db(): Db {
   return supabase as unknown as Db;
 }
 
-function fail(error: { message?: string } | null | undefined) {
+function fail(error: DbError | undefined) {
   if (error) throw new Error(error.message || "The CRM request failed.");
 }
 
@@ -144,10 +155,71 @@ function mapLead(row: LooseRow): CrmLead {
     source: pick<LeadSource>(row["source"], LEAD_SOURCES, "other"),
     status: pick<LeadStatus>(row["status"], LEAD_STATUSES, "new"),
     rating: pick<LeadRating>(row["rating"], LEAD_RATINGS, "warm"),
+    listingRating: num(row["listing_rating"]),
     estimatedValue: num(row["estimated_value"]),
     notes: text(row["notes"]),
     convertedAt: textOrNull(row["converted_at"]),
+    convertedAccountId: textOrNull(row["converted_account_id"]),
+    convertedContactId: textOrNull(row["converted_contact_id"]),
     convertedDealId: textOrNull(row["converted_deal_id"]),
+    demoStatus: pick<DemoStatus>(row["demo_status"], DEMO_STATUSES, "none"),
+    demoAt: textOrNull(row["demo_at"]),
+    demoOutcome: text(row["demo_outcome"]),
+    demoNotes: text(row["demo_notes"]),
+    nextFollowUpAt: textOrNull(row["next_follow_up_at"]),
+    importBatchId: textOrNull(row["import_batch_id"]),
+    importSequence: num(row["import_sequence"]),
+  };
+}
+
+function mapCallLog(row: LooseRow): CrmCallLog {
+  return {
+    id: text(row["id"]),
+    activityId: text(row["activity_id"]),
+    leadId: textOrNull(row["lead_id"]),
+    dealId: textOrNull(row["deal_id"]),
+    accountId: textOrNull(row["account_id"]),
+    contactId: textOrNull(row["contact_id"]),
+    direction: row["direction"] === "inbound" ? "inbound" : "outbound",
+    outcome: CALL_OUTCOMES.includes(row["outcome"] as CallOutcome)
+      ? (row["outcome"] as CallOutcome)
+      : null,
+    durationSeconds: num(row["duration_seconds"]),
+    recordingUrl: textOrNull(row["recording_url"]),
+    provider: textOrNull(row["provider"]),
+    remarks: text(row["remarks"]),
+    ownerId: text(row["owner_id"]),
+    ownerName: personName(row["owner"]) || "Unassigned",
+    createdAt: text(row["created_at"]),
+  };
+}
+
+function mapWhatsappConversation(row: LooseRow): CrmWhatsappConversation {
+  return {
+    id: text(row["id"]),
+    leadId: textOrNull(row["lead_id"]),
+    contactId: textOrNull(row["contact_id"]),
+    customerPhone: text(row["customer_phone"]),
+    status: row["status"] === "closed" ? "closed" : "open",
+    ownerId: text(row["owner_id"]),
+    ownerName: personName(row["owner"]) || "Unassigned",
+    createdAt: text(row["created_at"]),
+    updatedAt: text(row["updated_at"]),
+  };
+}
+
+function mapWhatsappMessage(row: LooseRow): CrmWhatsappMessage {
+  return {
+    id: text(row["id"]),
+    conversationId: text(row["conversation_id"]),
+    direction: row["direction"] === "inbound" ? "inbound" : "outbound",
+    body: text(row["body"]),
+    status:
+      typeof row["status"] === "string" &&
+      ["queued", "sent", "delivered", "read", "failed"].includes(row["status"])
+        ? (row["status"] as CrmWhatsappMessage["status"])
+        : "queued",
+    createdAt: text(row["created_at"]),
   };
 }
 
@@ -211,16 +283,54 @@ async function rows(query: PromiseLike<QueryResult>): Promise<LooseRow[]> {
   return Array.isArray(data) ? (data as LooseRow[]) : [];
 }
 
-async function save(table: string, id: string | null, payload: LooseRow) {
+async function runSave(table: string, id: string | null, payload: LooseRow): Promise<QueryResult> {
   const query = id
     ? db().from(table).update(payload).eq("id", id).select("id")
     : db().from(table).insert(payload).select("id");
-  const { data, error } = (await query) as QueryResult;
-  fail(error);
+  return (await query) as QueryResult;
+}
+
+function checkSaveResult(id: string | null, data: unknown) {
   // RLS hides rows the caller may not change: an update that matched nothing.
   if (id && (!Array.isArray(data) || data.length === 0)) {
     throw new Error("You can only change CRM records you own.");
   }
+}
+
+async function save(table: string, id: string | null, payload: LooseRow) {
+  const { data, error } = await runSave(table, id, payload);
+  fail(error);
+  checkSaveResult(id, data);
+}
+
+/**
+ * Like save(), but for columns that may not exist yet on a database where a
+ * newer migration has not been applied. If the full payload is rejected for
+ * missing column(s), retries once without `optionalKeys` so the rest of the
+ * save still goes through -- never silently: the caller gets `fellBack: true`
+ * and is expected to tell the user those specific fields were not saved.
+ */
+async function saveWithOptionalColumns(
+  table: string,
+  id: string | null,
+  payload: LooseRow,
+  optionalKeys: string[],
+): Promise<{ fellBack: boolean }> {
+  const { data, error } = await runSave(table, id, payload);
+  if (!error) {
+    checkSaveResult(id, data);
+    return { fellBack: false };
+  }
+  if (!isMissingDbObject(error)) {
+    fail(error);
+    return { fellBack: false };
+  }
+  const fallbackPayload = { ...payload };
+  for (const key of optionalKeys) delete fallbackPayload[key];
+  const retry = await runSave(table, id, fallbackPayload);
+  fail(retry.error);
+  checkSaveResult(id, retry.data);
+  return { fellBack: true };
 }
 
 async function remove(table: string, id: string) {
@@ -305,6 +415,21 @@ export const crmService = {
   deleteContact: (id: string) => remove("crm_contacts", id),
 
   // ------------------------------------------------------------------- leads
+  /**
+   * import_sequence is null for every hand-added lead (demo scheduling,
+   * "+ New lead", anything not from a sheet) and non-null for an imported
+   * one, so ordering by it ascending with nulls first puts every manual
+   * lead above every imported lead, no matter which is newer -- manual
+   * leads are never pushed down by an import. created_at descending then
+   * ranks manual leads newest-first among themselves (a fresh "+ New
+   * lead" lands at the very top). import_crm_leads always deletes the
+   * entire previous import batch before inserting a new one, so only one
+   * batch's rows exist at a time in normal use; within that one batch,
+   * created_at is too close for Postgres to order reliably, so
+   * import_sequence (ascending, set once at import time in sheet order)
+   * is what actually keeps it in sheet order. id is a final stable
+   * tiebreak.
+   */
   async leads(): Promise<CrmLead[]> {
     if (!isSupabaseConfigured || !supabase) return [];
     return (
@@ -312,28 +437,79 @@ export const crmService = {
         db()
           .from("crm_leads")
           .select(`*, ${OWNER("crm_leads")}`)
-          .order("created_at", { ascending: false }),
+          .order("import_sequence", { ascending: true, nullsFirst: true })
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false }),
       )
     ).map(mapLead);
   },
-  async saveLead(id: string | null, input: LeadInput) {
-    await save("crm_leads", id, {
-      first_name: input.firstName.trim(),
-      last_name: blank(input.lastName),
-      company: blank(input.company),
-      email: blank(input.email),
-      phone: blank(input.phone),
-      job_title: blank(input.jobTitle),
-      source: input.source,
-      status: input.status,
-      rating: input.rating,
-      estimated_value: input.estimatedValue,
-      notes: blank(input.notes),
-      ...ownerPatch(input.ownerId),
-    });
+  /**
+   * If this database does not have the demo-tracking columns yet (migration
+   * 20261112130740 not applied), the demo fields are dropped and the rest of
+   * the lead still saves -- `demoFieldsSaved: false` tells the caller to warn
+   * the user those fields were not persisted, rather than staying silent.
+   */
+  async saveLead(id: string | null, input: LeadInput): Promise<{ demoFieldsSaved: boolean }> {
+    const { fellBack } = await saveWithOptionalColumns(
+      "crm_leads",
+      id,
+      {
+        first_name: input.firstName.trim(),
+        last_name: blank(input.lastName),
+        company: blank(input.company),
+        email: blank(input.email),
+        phone: blank(input.phone),
+        job_title: blank(input.jobTitle),
+        source: input.source,
+        status: input.status,
+        rating: input.rating,
+        listing_rating: input.listingRating,
+        estimated_value: input.estimatedValue,
+        notes: blank(input.notes),
+        demo_status: input.demoStatus,
+        demo_at: input.demoAt || null,
+        demo_outcome: blank(input.demoOutcome),
+        demo_notes: blank(input.demoNotes),
+        next_follow_up_at: input.nextFollowUpAt || null,
+        ...ownerPatch(input.ownerId),
+      },
+      [
+        "demo_status",
+        "demo_at",
+        "demo_outcome",
+        "demo_notes",
+        "next_follow_up_at",
+        "listing_rating",
+      ],
+    );
+    return { demoFieldsSaved: !fellBack };
   },
   async setLeadStatus(id: string, status: LeadStatus) {
     await save("crm_leads", id, { status });
+  },
+  /**
+   * Demo tracking only exists once migration 20261112130740 is applied.
+   * Unlike saveLead(), there is nothing else useful to save here if those
+   * columns are missing, so this fails loudly rather than pretending to
+   * have recorded a demo status that was not actually written.
+   */
+  async setLeadDemo(
+    id: string,
+    demo: {
+      demoStatus: DemoStatus;
+      demoAt?: string | null;
+      demoOutcome?: string | null;
+      demoNotes?: string | null;
+      nextFollowUpAt?: string | null;
+    },
+  ) {
+    await save("crm_leads", id, {
+      demo_status: demo.demoStatus,
+      demo_at: demo.demoAt || null,
+      demo_outcome: blank(demo.demoOutcome ?? null),
+      demo_notes: blank(demo.demoNotes ?? null),
+      next_follow_up_at: demo.nextFollowUpAt || null,
+    });
   },
   async convertLead(
     id: string,
@@ -354,7 +530,67 @@ export const crmService = {
       dealId: textOrNull(row["deal_id"]),
     };
   },
-  deleteLead: (id: string) => remove("crm_leads", id),
+  /**
+   * Calls delete_crm_lead (see final_fix_4.sql), not a plain delete: removing
+   * a lead must also remove what "Convert to deal" created from it (its
+   * account/contact/deal) and everything that points to any of those, with
+   * everything archived first. A plain `delete from crm_leads` would only
+   * clear the lead's own converted_account_id/converted_contact_id/
+   * converted_deal_id columns and leave those rows (and anything pointing at
+   * them) behind untouched.
+   */
+  async deleteLead(id: string) {
+    const { error } = await db().rpc("delete_crm_lead", { p_lead_id: id });
+    fail(error);
+  },
+  /**
+   * Replaces the previous import (if any) with this one, inside a single
+   * database transaction (see import_crm_leads in
+   * supabase/migrations/20261117110000_crm_import_leads_rpc.sql): nothing
+   * is removed or inserted unless the whole call succeeds. Column mapping
+   * and duplicate detection against every remaining lead happen entirely
+   * inside that function -- this is just the thin client call.
+   */
+  async importLeads(
+    fileName: string,
+    leadRows: Array<{
+      firstName: string;
+      lastName?: string;
+      company?: string;
+      email?: string;
+      phone?: string;
+      jobTitle?: string;
+      estimatedValue?: number | null;
+      listingRating?: number | null;
+    }>,
+  ): Promise<{
+    insertedCount: number;
+    duplicateCount: number;
+    deletedCount: number;
+    restoredCount: number;
+  }> {
+    const { data, error } = await db().rpc("import_crm_leads", {
+      p_file_name: fileName,
+      p_rows: leadRows.map((row) => ({
+        first_name: row.firstName,
+        last_name: row.lastName ?? null,
+        company: row.company ?? null,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
+        job_title: row.jobTitle ?? null,
+        estimated_value: row.estimatedValue ?? null,
+        listing_rating: row.listingRating ?? null,
+      })),
+    });
+    fail(error);
+    const result = (data ?? {}) as LooseRow;
+    return {
+      insertedCount: num(result["inserted_count"]) ?? 0,
+      duplicateCount: num(result["duplicate_count"]) ?? 0,
+      deletedCount: num(result["deleted_count"]) ?? 0,
+      restoredCount: num(result["restored_count"]) ?? 0,
+    };
+  },
 
   // ------------------------------------------------------------------- deals
   async deals(): Promise<CrmDeal[]> {
@@ -435,5 +671,145 @@ export const crmService = {
       p_is_sales: isSales,
     });
     fail(error);
+  },
+
+  // -------------------------------------------------------------- call logs
+  async callLogsForActivity(activityId: string): Promise<CrmCallLog[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    return (
+      await rows(
+        db()
+          .from("crm_call_logs")
+          .select(`*, ${OWNER("crm_call_logs")}`)
+          .eq("activity_id", activityId)
+          .order("created_at", { ascending: false }),
+      )
+    ).map(mapCallLog);
+  },
+  /**
+   * Logs the call, then applies the lead-level side effect its outcome
+   * implies: "wrong_number" disqualifies the lead (status -> unqualified);
+   * "no_answer" / "busy" / "call_back_required" schedule a follow-up. Both
+   * only run when the call is linked to a lead and a follow-up date was
+   * given where required -- neither is forced, since the UI decides whether
+   * to ask for one.
+   */
+  /** Latest call log per activity, for the activities export (avoids one query per row). */
+  async callLogsForActivities(activityIds: string[]): Promise<Map<string, CrmCallLog>> {
+    if (!isSupabaseConfigured || !supabase || activityIds.length === 0) return new Map();
+    const logs = (
+      await rows(
+        db()
+          .from("crm_call_logs")
+          .select(`*, ${OWNER("crm_call_logs")}`)
+          .in("activity_id", activityIds)
+          .order("created_at", { ascending: false }),
+      )
+    ).map(mapCallLog);
+    const byActivity = new Map<string, CrmCallLog>();
+    for (const log of logs) {
+      if (!byActivity.has(log.activityId)) byActivity.set(log.activityId, log);
+    }
+    return byActivity;
+  },
+  async logCall(
+    input: CallLogInput & { leadId?: string | null; followUpAt?: string | null },
+  ): Promise<CrmCallLog> {
+    const payload = {
+      activity_id: input.activityId,
+      direction: input.direction,
+      outcome: input.outcome,
+      duration_seconds: input.durationSeconds ?? null,
+      recording_url: blank(input.recordingUrl ?? null),
+      provider: blank(input.provider ?? null),
+      remarks: blank(input.remarks ?? null),
+      ...ownerPatch(input.ownerId),
+    };
+    const { data, error } = (await db()
+      .from("crm_call_logs")
+      .insert(payload)
+      .select(`*, ${OWNER("crm_call_logs")}`)
+      .single()) as QueryResult;
+    fail(error);
+
+    if (input.leadId) {
+      if (input.outcome === "wrong_number") {
+        await save("crm_leads", input.leadId, { status: "unqualified" });
+      } else if (
+        (input.outcome === "no_answer" ||
+          input.outcome === "busy" ||
+          input.outcome === "call_back_required") &&
+        input.followUpAt
+      ) {
+        await save("crm_leads", input.leadId, { next_follow_up_at: input.followUpAt });
+      }
+    }
+
+    return mapCallLog(one(data) ?? {});
+  },
+
+  // ------------------------------------------------------------- whatsapp
+  /**
+   * CRM-side foundation only. Actually delivering a message requires the
+   * official WhatsApp Business API/provider, which is not configured in
+   * this environment -- see src/lib/whatsapp-provider.ts. This records the
+   * outbound message as "failed" with the provider's refusal reason rather
+   * than claiming it was sent.
+   */
+  async whatsappConversations(): Promise<CrmWhatsappConversation[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    return (
+      await rows(
+        db()
+          .from("crm_whatsapp_conversations")
+          .select(`*, ${OWNER("crm_whatsapp_conversations")}`)
+          .order("updated_at", { ascending: false }),
+      )
+    ).map(mapWhatsappConversation);
+  },
+  async whatsappMessages(conversationId: string): Promise<CrmWhatsappMessage[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    return (
+      await rows(
+        db()
+          .from("crm_whatsapp_messages")
+          .select("*")
+          .eq("conversation_id", conversationId)
+          .order("created_at", { ascending: true }),
+      )
+    ).map(mapWhatsappMessage);
+  },
+  async openWhatsappConversation(input: {
+    leadId?: string | null;
+    contactId?: string | null;
+    customerPhone: string;
+    ownerId?: string;
+  }) {
+    const { data, error } = (await db()
+      .from("crm_whatsapp_conversations")
+      .insert({
+        lead_id: input.leadId || null,
+        contact_id: input.contactId || null,
+        customer_phone: input.customerPhone.trim(),
+        ...ownerPatch(input.ownerId),
+      })
+      .select("id")
+      .single()) as QueryResult;
+    fail(error);
+    return text(one(data)?.["id"]);
+  },
+  /**
+   * Sends through the whatsapp-send Edge Function, which both calls the
+   * real WhatsApp Business API and records the resulting message (status
+   * "sent" only on confirmed provider acceptance, "failed" otherwise) --
+   * see src/lib/whatsapp-provider.ts and supabase/functions/whatsapp-send.
+   * This never inserts into crm_whatsapp_messages itself: the Edge Function
+   * already does, using the caller's own session, so RLS/ownership apply
+   * exactly as if the browser had written the row directly, with no
+   * separate client-side insert that could create a duplicate or a row the
+   * provider call didn't actually agree with.
+   */
+  async sendWhatsappMessage(conversationId: string, customerPhone: string, body: string) {
+    await whatsappProvider.sendMessage(conversationId, customerPhone, body.trim());
   },
 };

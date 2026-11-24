@@ -67,7 +67,9 @@ function EmployeesPage() {
     firstName: "",
     lastName: "",
     email: "",
-    employeeCode: "",
+    // The typed part only -- the fixed "JV-" prefix is rendered separately
+    // and joined back on submit, so the user can never delete it.
+    employeeCodeDigits: "",
     joiningDate: "",
     employmentType: "full-time",
     departmentId: "",
@@ -75,6 +77,7 @@ function EmployeesPage() {
     bloodGroup: "",
   };
   const [form, setForm] = useState(emptyForm);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const queryClient = useQueryClient();
 
   const departments = useQuery({
@@ -97,27 +100,73 @@ function EmployeesPage() {
     },
     enabled: !isLoading,
   });
+  // Next free "JV-<n>" suggestion, from whatever the directory already has
+  // loaded -- a convenience default the admin can still freely overwrite,
+  // never a reservation (the real uniqueness check is server-side, in
+  // employeeService.create()).
+  const suggestedCodeDigits = useMemo(() => {
+    const max = (employees.data ?? []).reduce((best, e) => {
+      const match = /^JV-([0-9]+)$/.exec(e.code ?? "");
+      return match ? Math.max(best, Number(match[1])) : best;
+    }, 0);
+    return String(max + 1);
+  }, [employees.data]);
+  const employeeCode = `JV-${form.employeeCodeDigits}`;
+
+  function focusFirstInvalid(errors: Record<string, string>) {
+    const firstKey = Object.keys(errors)[0];
+    if (!firstKey) return;
+    document.getElementById(`add-employee-${firstKey}`)?.focus();
+  }
+
   const addEmployee = useMutation({
     mutationFn: () => {
-      if ((designations.data ?? []).length > 0 && !form.designationId) {
-        throw new Error("Designation is required.");
+      const errors: Record<string, string> = {};
+      if (!form["firstName"].trim()) errors["firstName"] = "First name is required.";
+      if (!form["lastName"].trim()) errors["lastName"] = "Last name is required.";
+      if (!form["email"].trim()) errors["email"] = "Work email is required.";
+      if (!form["employeeCodeDigits"].trim()) {
+        errors["employeeCodeDigits"] = "Employee code is required.";
+      }
+      if (!form["joiningDate"].trim()) errors["joiningDate"] = "Joining date is required.";
+      if (!form["departmentId"]) errors["departmentId"] = "Department is required.";
+      if ((designations.data ?? []).length > 0 && !form["designationId"]) {
+        errors["designationId"] = "Designation is required.";
+      }
+      setFieldErrors(errors);
+      if (Object.keys(errors).length > 0) {
+        focusFirstInvalid(errors);
+        throw new Error("Fill in the required fields.");
       }
       return employeeService.create(
-        isTeamLead && user.employeeId ? { ...form, managerId: user.employeeId } : form,
+        isTeamLead && user.employeeId
+          ? { ...form, employeeCode, managerId: user.employeeId }
+          : { ...form, employeeCode },
       );
     },
     onSuccess: (created) => {
       toast.success("Employee added", {
-        description: `${created.email} must sign up with this exact work email before they can log in.`,
+        description: `${created.email} is active and must sign up with this exact work email before they can log in.`,
       });
       setAddOpen(false);
       setForm(emptyForm);
+      setFieldErrors({});
       void queryClient.invalidateQueries({ queryKey: ["employees"] });
     },
-    onError: (e) =>
-      toast.error("Could not add employee", {
-        description: e instanceof Error ? e.message : "Supabase request failed.",
-      }),
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : "Supabase request failed.";
+      // The one validation this app can check ahead of the request --
+      // employee code uniqueness -- gets its own inline error under the
+      // field, matching the rest of the form, instead of only a toast.
+      if (/employee code is already in use/i.test(message)) {
+        setFieldErrors((current) => ({ ...current, employeeCodeDigits: message }));
+        focusFirstInvalid({ employeeCodeDigits: message });
+        return;
+      }
+      if (message !== "Fill in the required fields.") {
+        toast.error("Could not add employee", { description: message });
+      }
+    },
   });
   const changeStatus = useMutation({
     mutationFn: () => {
@@ -359,7 +408,7 @@ function EmployeesPage() {
         }
       />
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Add employee</DialogTitle>
           </DialogHeader>
@@ -373,20 +422,62 @@ function EmployeesPage() {
                 ["firstName", "First name", "text"],
                 ["lastName", "Last name", "text"],
                 ["email", "Work email", "email"],
-                ["employeeCode", "Employee code", "text"],
                 ["joiningDate", "Joining date", "date"],
               ] as const
             ).map(([key, label, type]) => (
               <div key={key} className="space-y-1">
-                <Label>{label}</Label>
+                <Label htmlFor={`add-employee-${key}`}>{label} *</Label>
                 <Input
+                  id={`add-employee-${key}`}
                   type={type}
                   required
                   value={form[key]}
-                  onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                  aria-invalid={Boolean(fieldErrors[key])}
+                  className={fieldErrors[key] ? "border-destructive" : undefined}
+                  onChange={(event) => {
+                    setForm({ ...form, [key]: event.target.value });
+                    if (fieldErrors[key]) setFieldErrors({ ...fieldErrors, [key]: "" });
+                  }}
                 />
+                {fieldErrors[key] ? (
+                  <p className="text-xs text-destructive">{fieldErrors[key]}</p>
+                ) : null}
               </div>
             ))}
+            <div className="space-y-1">
+              <Label htmlFor="add-employee-employeeCodeDigits">Employee code *</Label>
+              <div
+                className={`flex h-10 items-center rounded-md border bg-background px-3 text-sm ${
+                  fieldErrors["employeeCodeDigits"] ? "border-destructive" : ""
+                }`}
+              >
+                <span className="select-none text-muted-foreground">JV-</span>
+                <input
+                  id="add-employee-employeeCodeDigits"
+                  type="text"
+                  inputMode="numeric"
+                  required
+                  placeholder={suggestedCodeDigits}
+                  value={form["employeeCodeDigits"]}
+                  aria-invalid={Boolean(fieldErrors["employeeCodeDigits"])}
+                  className="w-full bg-transparent outline-none"
+                  onChange={(event) => {
+                    const digits = event.target.value.replace(/[^0-9]/g, "");
+                    setForm({ ...form, employeeCodeDigits: digits });
+                    if (fieldErrors["employeeCodeDigits"]) {
+                      setFieldErrors({ ...fieldErrors, employeeCodeDigits: "" });
+                    }
+                  }}
+                />
+              </div>
+              {fieldErrors["employeeCodeDigits"] ? (
+                <p className="text-xs text-destructive">{fieldErrors["employeeCodeDigits"]}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Suggested next code: JV-{suggestedCodeDigits}
+                </p>
+              )}
+            </div>
             <div className="space-y-1">
               <Label>Blood group</Label>
               <select
@@ -403,11 +494,20 @@ function EmployeesPage() {
               </select>
             </div>
             <div className="space-y-1">
-              <Label>Department</Label>
+              <Label htmlFor="add-employee-departmentId">Department *</Label>
               <select
-                className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                value={form.departmentId}
-                onChange={(event) => setForm({ ...form, departmentId: event.target.value })}
+                id="add-employee-departmentId"
+                className={`h-10 w-full rounded-md border bg-background px-3 text-sm ${
+                  fieldErrors["departmentId"] ? "border-destructive" : ""
+                }`}
+                value={form["departmentId"]}
+                aria-invalid={Boolean(fieldErrors["departmentId"])}
+                onChange={(event) => {
+                  setForm({ ...form, departmentId: event.target.value });
+                  if (fieldErrors["departmentId"]) {
+                    setFieldErrors({ ...fieldErrors, departmentId: "" });
+                  }
+                }}
               >
                 <option value="">Select department</option>
                 {(departments.data ?? []).map((department) => (
@@ -416,6 +516,9 @@ function EmployeesPage() {
                   </option>
                 ))}
               </select>
+              {fieldErrors["departmentId"] ? (
+                <p className="text-xs text-destructive">{fieldErrors["departmentId"]}</p>
+              ) : null}
             </div>
             {designations.isError ? (
               <p className="text-sm text-destructive sm:col-span-2">
@@ -424,11 +527,20 @@ function EmployeesPage() {
             ) : null}
             {(designations.data ?? []).length > 0 ? (
               <div className="space-y-1">
-                <Label>Designation</Label>
+                <Label htmlFor="add-employee-designationId">Designation *</Label>
                 <select
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  value={form.designationId}
-                  onChange={(event) => setForm({ ...form, designationId: event.target.value })}
+                  id="add-employee-designationId"
+                  className={`h-10 w-full rounded-md border bg-background px-3 text-sm ${
+                    fieldErrors["designationId"] ? "border-destructive" : ""
+                  }`}
+                  value={form["designationId"]}
+                  aria-invalid={Boolean(fieldErrors["designationId"])}
+                  onChange={(event) => {
+                    setForm({ ...form, designationId: event.target.value });
+                    if (fieldErrors["designationId"]) {
+                      setFieldErrors({ ...fieldErrors, designationId: "" });
+                    }
+                  }}
                 >
                   <option value="">Select designation</option>
                   {(designations.data ?? []).map((designation) => (
@@ -437,6 +549,9 @@ function EmployeesPage() {
                     </option>
                   ))}
                 </select>
+                {fieldErrors["designationId"] ? (
+                  <p className="text-xs text-destructive">{fieldErrors["designationId"]}</p>
+                ) : null}
               </div>
             ) : null}
             <div className="space-y-1">

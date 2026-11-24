@@ -5,6 +5,19 @@ import type { LeaveRequest } from "@/types";
 import { fromFixture, logAudit, matchesSearch, requireEmployeeId, type QueryOptions } from "./api";
 
 function mapLeave(row: any): LeaveRequest {
+  // appliedOn is the date the request was SUBMITTED, not the leave's own
+  // start_date. leave_requests has no created_at column (confirmed against
+  // the generated DB types), so this uses the leave_ledger row the
+  // leave_ledger_on_request_change trigger writes at insert time (the same
+  // "Leave requested" entry the ledger itself shows), via the
+  // ledger:leave_ledger(...) embed added to both queries below -- no
+  // schema change, select-only.
+  const ledgerRows: { created_at: string; transaction_type: string }[] = Array.isArray(row.ledger)
+    ? row.ledger
+    : row.ledger
+      ? [row.ledger]
+      : [];
+  const ledgerRow = ledgerRows.find((entry) => entry.transaction_type === "request");
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -15,7 +28,7 @@ function mapLeave(row: any): LeaveRequest {
     days: Number(row.total_days ?? 0),
     reason: row.reason,
     status: row.status,
-    appliedOn: row.start_date,
+    appliedOn: ledgerRow?.created_at ?? row.start_date,
     approver: row.approved_by_profile?.full_name ?? "",
   };
 }
@@ -33,7 +46,7 @@ export const leaveService = {
     let query = supabase
       .from("leave_requests")
       .select(
-        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)",
+        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name), ledger:leave_ledger!leave_request_id(created_at, transaction_type)",
       );
     if (options.employeeId) query = query.eq("employee_id", options.employeeId);
     if (options.status && options.status !== "all") query = query.eq("status", options.status);
@@ -52,7 +65,7 @@ export const leaveService = {
     const { data, error } = await supabase
       .from("leave_requests")
       .select(
-        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name)",
+        "*, employees(first_name,last_name), leave_types(name), approved_by_profile:approved_by(full_name), ledger:leave_ledger!leave_request_id(created_at, transaction_type)",
       )
       .eq("status", "pending");
     if (error) throw error;

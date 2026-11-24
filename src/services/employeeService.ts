@@ -23,6 +23,20 @@ import { displayName, normalizeKey } from "@/lib/normalize";
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
+ * Title-cases a name ONLY for words that are entirely lowercase (e.g. a
+ * data-entry inconsistency like "network support" -> "Network Support").
+ * A word that already has any uppercase letter (CEO, CFO, BA, HR Manager)
+ * is left exactly as typed, so a real acronym never gets mangled into
+ * "Ceo"/"Cfo"/"Ba". Display-only -- never written back to the database.
+ */
+function titleCase(value: string): string {
+  return value
+    .split(" ")
+    .map((word) => (word === word.toLowerCase() ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(" ");
+}
+
+/**
  * Decide the exit_date column for an employment status change.
  * undefined means leave the stored date untouched.
  */
@@ -177,6 +191,9 @@ export const employeeService = {
     if (!emailHasDomain(email)) throw new Error("Enter a valid work email.");
     if (!input.departmentId) throw new Error("Department is required.");
     if (!EMPLOYMENT_TYPES.has(employmentType)) throw new Error("Employment type is required.");
+    if (!/^JV-[0-9]+$/.test(employeeCode)) {
+      throw new Error('Employee code must be "JV-" followed by digits, e.g. JV-91.');
+    }
 
     const duplicateEmail = await supabase
       .from("employees")
@@ -213,7 +230,15 @@ export const employeeService = {
         department_id: input.departmentId,
         designation_id: input.designationId || null,
         employment_type: employmentType,
-        employment_status: "pending_approval",
+        // Admin-created employees are active immediately -- the admin is
+        // the one creating and vouching for this record, so there's
+        // nothing to "approve." "pending_approval" is reserved for the
+        // separate self-signup onboarding flow (an employee who signs up
+        // and submits their own profile for review); see handle_new_user()
+        // in 20260926120000_auth_security.sql, which links a new sign-up
+        // to this row by email + profile_id is null regardless of this
+        // status, so this change doesn't affect that linking at all.
+        employment_status: "active",
         joining_date: input.joiningDate,
         manager_id: input.managerId || null,
         blood_group: bloodGroup ?? null,
@@ -468,7 +493,13 @@ export const employeeService = {
     if (error) throw error;
     return (data ?? [])
       .filter((row) => row.is_active !== false && row.id && row.name)
-      .map((row) => ({ id: row.id, name: displayName(row.name ?? "") }));
+      // Title-cased for display only (e.g. "network support" -> "Network
+      // Support") -- never written back, so existing records are
+      // untouched. Sorted case-insensitively, since the SQL .order("name")
+      // above is byte/collation-based and puts every all-caps name (BA,
+      // CEO, CFO...) before any lowercase one (network support).
+      .map((row) => ({ id: row.id, name: titleCase(displayName(row.name ?? "")) }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   },
   async designations(): Promise<string[]> {
     if (!isSupabaseConfigured || !supabase)

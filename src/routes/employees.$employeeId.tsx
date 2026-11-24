@@ -544,7 +544,7 @@ function EmployeeDetailPage() {
             <TabsTrigger value="complaints">Complaints</TabsTrigger>
           </TabsList>
 
-          <PersonalTab employee={emp} footer={passwordForm} />
+          <PersonalTab employee={emp} footer={passwordForm} isOwnProfile={isOwnProfile} />
           <EmploymentTab employee={emp} isOwnProfile={isOwnProfile} />
           <AttendanceTab
             records={attendance.data}

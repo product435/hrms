@@ -69,10 +69,8 @@ function readSortValue<T>(row: T, column: Column<T>): SortValue {
   return null;
 }
 
+/** Null/undefined always sorts last, in both directions -- handled by the caller before direction is applied. */
 function compareSortValues(left: SortValue, right: SortValue) {
-  if (left == null && right == null) return 0;
-  if (left == null) return 1;
-  if (right == null) return -1;
   if (left instanceof Date || right instanceof Date) {
     const leftTime = left instanceof Date ? left.getTime() : Number(left);
     const rightTime = right instanceof Date ? right.getTime() : Number(right);
@@ -112,10 +110,14 @@ export function DataTable<T>({
     const column = columns.find((item) => item.key === sort.key);
     if (!column || !columnIsSortable(column)) return source;
     const direction = sort.direction === "asc" ? 1 : -1;
-    return [...source].sort(
-      (left, right) =>
-        direction * compareSortValues(readSortValue(left, column), readSortValue(right, column)),
-    );
+    return [...source].sort((left, right) => {
+      const leftValue = readSortValue(left, column);
+      const rightValue = readSortValue(right, column);
+      if (leftValue == null && rightValue == null) return 0;
+      if (leftValue == null) return 1;
+      if (rightValue == null) return -1;
+      return direction * compareSortValues(leftValue, rightValue);
+    });
   }, [columns, sort, tableRows]);
 
   const pageCount = size > 0 ? Math.max(1, Math.ceil(sortedRows.length / size)) : 1;
