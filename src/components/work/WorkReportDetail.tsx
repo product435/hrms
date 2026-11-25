@@ -146,7 +146,7 @@ export function WorkReportDetail({
             {report.items.map((item) => (
               <li key={item.id} className="space-y-2 px-3 py-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
-                  <p className="min-w-0 flex-1 text-sm font-medium">
+                  <p className="min-w-0 flex-1 whitespace-pre-wrap text-sm font-medium">
                     {item.description || "Work item"}
                   </p>
                   <div className="flex flex-wrap items-center gap-2">

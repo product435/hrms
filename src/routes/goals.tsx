@@ -1,13 +1,15 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Target } from "lucide-react";
+import { Pencil, Plus, Target } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
 import { DataTable, type Column } from "@/components/common/DataTable";
+import { DateRangeFilter, type DateRange } from "@/components/common/DateRangeFilter";
 import { FilterBar } from "@/components/common/FilterBar";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/States";
+import { IconAction } from "@/components/common/IconAction";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -66,6 +68,9 @@ function GoalsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [open, setOpen] = useState(false);
+  // Set when the open form dialog is editing an existing self-created goal
+  // instead of creating a new one -- same fields/layout, different submit.
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -74,6 +79,7 @@ function GoalsPage() {
     weight: "",
     kraId: "",
   });
+  const [dueDateRange, setDueDateRange] = useState<DateRange>({ from: "", to: "" });
   const queryClient = useQueryClient();
 
   const goals = useQuery({
@@ -102,6 +108,16 @@ function GoalsPage() {
       if (rawWeight === "" || !Number.isFinite(weight) || weight < 0 || weight > 100) {
         throw new Error("Weight must be between 0 and 100.");
       }
+      if (editingGoalId) {
+        return talentService.updateOwnGoal(editingGoalId, {
+          title: form.title,
+          description: form.description,
+          target: form.target,
+          dueDate: form.dueDate,
+          weight,
+          kraId: form.kraId || null,
+        });
+      }
       return talentService.createGoal({
         employeeId: user.employeeId,
         title: form.title,
@@ -114,13 +130,14 @@ function GoalsPage() {
       });
     },
     onSuccess: () => {
-      toast.success("Goal added");
+      toast.success(editingGoalId ? "Goal updated" : "Goal added");
       setOpen(false);
+      setEditingGoalId(null);
       setForm({ title: "", description: "", target: "", dueDate: "", weight: "", kraId: "" });
       void queryClient.invalidateQueries({ queryKey: ["goals"] });
     },
     onError: (e) =>
-      toast.error("Could not add goal", {
+      toast.error(editingGoalId ? "Could not update goal" : "Could not add goal", {
         description: e instanceof Error ? e.message : "Supabase request failed.",
       }),
   });
@@ -201,16 +218,39 @@ function GoalsPage() {
         key: "goal",
         header: "Goal",
         cell: (row) => (
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{row.title}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {row.employeeName} · {row.category}
-            </p>
-            {row.kraName ? (
-              <p className="truncate text-xs text-muted-foreground">KRA: {row.kraName}</p>
-            ) : (
-              <p className="truncate text-xs italic text-muted-foreground">No matching KRA</p>
-            )}
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{row.title}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {row.employeeName} · {row.category}
+              </p>
+              {row.kraName ? (
+                <p className="truncate text-xs text-muted-foreground">KRA: {row.kraName}</p>
+              ) : (
+                <p className="truncate text-xs italic text-muted-foreground">No matching KRA</p>
+              )}
+            </div>
+            {/* My Goals only -- the admin Goals & OKRs page is unchanged. */}
+            {isSelfService && canEditGoal(row) ? (
+              <IconAction
+                label="Edit goal"
+                variant="ghost"
+                onClick={() => {
+                  setEditingGoalId(row.id);
+                  setForm({
+                    title: row.title,
+                    description: row.description ?? "",
+                    target: row.target ?? "",
+                    dueDate: row.dueDate ?? "",
+                    weight: String(row.weight),
+                    kraId: row.kraId ?? "",
+                  });
+                  setOpen(true);
+                }}
+              >
+                <Pencil />
+              </IconAction>
+            ) : null}
           </div>
         ),
       },
@@ -338,11 +378,20 @@ function GoalsPage() {
     submitProgress,
     canManageAny,
     isLead,
+    isSelfService,
     myEmployeeId,
     today,
   ]);
 
-  const visible = data;
+  // My Goals only -- Both set = only due dates in the range; only From or
+  // only To = that side open-ended; the admin Goals & OKRs page is unaffected.
+  const visible = isSelfService
+    ? data.filter((goal) => {
+        if (dueDateRange.from && (!goal.dueDate || goal.dueDate < dueDateRange.from)) return false;
+        if (dueDateRange.to && (!goal.dueDate || goal.dueDate > dueDateRange.to)) return false;
+        return true;
+      })
+    : data;
 
   return (
     <AppLayout>
@@ -351,7 +400,21 @@ function GoalsPage() {
         title={isSelfService ? "My goals" : "Goals & OKRs"}
         description="Track objectives, weights and completion across the organisation."
         actions={
-          <Button onClick={() => setOpen(true)} disabled={!isLead && role !== "employee"}>
+          <Button
+            onClick={() => {
+              setEditingGoalId(null);
+              setForm({
+                title: "",
+                description: "",
+                target: "",
+                dueDate: "",
+                weight: "",
+                kraId: "",
+              });
+              setOpen(true);
+            }}
+            disabled={!isLead && role !== "employee"}
+          >
             <Plus className="size-4" /> Add goal
           </Button>
         }
@@ -381,7 +444,14 @@ function GoalsPage() {
             { value: "completed", label: "Completed" },
           ]}
         />
-      ) : null}
+      ) : (
+        <DateRangeFilter
+          from={dueDateRange.from}
+          to={dueDateRange.to}
+          onApply={(from, to) => setDueDateRange({ from, to })}
+          onClear={() => setDueDateRange({ from: "", to: "" })}
+        />
+      )}
 
       {goals.isLoading ? (
         <TableSkeleton />
@@ -399,7 +469,7 @@ function GoalsPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add goal</DialogTitle>
+            <DialogTitle>{editingGoalId ? "Edit goal" : "Add goal"}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-3">
             <div>
@@ -470,7 +540,7 @@ function GoalsPage() {
               Cancel
             </Button>
             <Button onClick={() => addGoal.mutate()} disabled={addGoal.isPending}>
-              {addGoal.isPending ? "Saving…" : "Add goal"}
+              {addGoal.isPending ? "Saving…" : editingGoalId ? "Save changes" : "Add goal"}
             </Button>
           </DialogFooter>
         </DialogContent>

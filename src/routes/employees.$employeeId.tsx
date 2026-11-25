@@ -20,10 +20,12 @@ import { LeaveTab } from "@/components/employees/LeaveTab";
 import { PerformanceTab } from "@/components/employees/PerformanceTab";
 import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
 import { SetEmployeePasswordDialog } from "@/components/auth/SetEmployeePasswordDialog";
-import { MobileInput } from "@/components/common/MobileInput";
+import {
+  EmployeeFormFields,
+  type EmployeeFormValues,
+} from "@/components/employees/EmployeeFormFields";
 import { PersonalTab } from "@/components/employees/PersonalTab";
 import { Button } from "@/components/ui/button";
-import { BLOOD_GROUPS, GENDERS, MARITAL_STATUSES, isIndianMobile } from "@/lib/onboarding-schema";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,62 +60,9 @@ import { leaveService } from "@/services/leaveService";
 import { talentService } from "@/services/talentService";
 import { workplaceService } from "@/services/workplaceService";
 import { complaintsService } from "@/services/complaintsService";
-import {
-  indiaDateKey,
-  indiaLocalDateTimeToUtcIso,
-  indianTime,
-  initialsOf,
-  shortDate,
-} from "@/lib/format";
+import { indiaLocalDateTimeToUtcIso, indianTime, initialsOf, shortDate } from "@/lib/format";
 import { queryKeys } from "@/lib/query-keys";
 import type { ComplaintPriority, ComplaintStatus } from "@/types";
-
-const selectClass = "h-10 w-full rounded-md border bg-background px-3 text-sm";
-
-function keptOrListed(value: string, original: string, allowed: readonly string[]) {
-  if (allowed.includes(value)) return value;
-  if (value === original) return undefined;
-  return value;
-}
-
-function keptOrMobile(value: string, original: string) {
-  const trimmed = value.trim();
-  if (!trimmed || isIndianMobile(trimmed)) return trimmed;
-  if (trimmed === original.trim()) return undefined;
-  return trimmed;
-}
-
-function ChoiceField({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: readonly string[];
-  onChange: (value: string) => void;
-}) {
-  const known = options.includes(value);
-  return (
-    <div className="space-y-1">
-      <Label>{label}</Label>
-      <select
-        className={selectClass}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">Select</option>
-        {options.map((item) => (
-          <option key={item} value={item}>
-            {item}
-          </option>
-        ))}
-        {!known && value ? <option value={value}>{value}</option> : null}
-      </select>
-    </div>
-  );
-}
 
 export const Route = createFileRoute("/employees/$employeeId")({
   beforeLoad: async ({ params }) => {
@@ -164,77 +113,143 @@ function EmployeeDetailPage() {
   const canEditProfile = canEditHrFields || isOwnProfile;
   const canChangeEmploymentStatus = canEditHrFields && !isOwnProfile;
 
+  // Fields a plain employee can edit on their own row -- matches exactly
+  // what employees_guard_self_assignment() does NOT revert on a self-update
+  // (confirmed by reading that function): first_name, last_name, phone,
+  // gender, date_of_birth, blood_group, marital_status, work_location.
+  // Everything else (email, employeeCode, joiningDate, departmentId,
+  // designationId, employmentType, status/exitDate) is reverted server-side
+  // regardless of what the UI sends, so it's shown read-only here too.
+  const SELF_EDITABLE_FIELDS: readonly (keyof EmployeeFormValues)[] = [
+    "firstName",
+    "lastName",
+    "phone",
+    "gender",
+    "dateOfBirth",
+    "bloodGroup",
+    "maritalStatus",
+    "location",
+  ];
+  const editableFields = canEditHrFields ? undefined : SELF_EDITABLE_FIELDS;
+
   const [editOpen, setEditOpen] = useState(false);
-  const [passwordOpen, setPasswordOpen] = useState(false);
-  const [lifecycle, setLifecycle] = useState<
-    null | "suspend" | "terminate" | "activate" | "reinstate"
-  >(null);
-  const statusToast = useRef<string | null>(null);
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<EmployeeFormValues>({
     firstName: "",
     lastName: "",
+    email: "",
     phone: "",
-    gender: "",
+    joiningDate: "",
     dateOfBirth: "",
-    bloodGroup: "",
-    maritalStatus: "",
-    workLocation: "",
+    employeeCode: "",
+    gender: "",
+    departmentId: "",
+    designationId: "",
     employmentType: "full-time",
     status: "active",
+    bloodGroup: "",
+    maritalStatus: "",
+    location: "",
     exitDate: "",
+  });
+  const [editFieldErrors, setEditFieldErrors] = useState<Record<string, string>>({});
+  const editDepartments = useQuery({
+    queryKey: ["departments"],
+    queryFn: () => employeeService.departments(),
+    enabled: editOpen,
+  });
+  const editDesignations = useQuery({
+    queryKey: ["designation-options"],
+    queryFn: () => employeeService.designationOptions(),
+    enabled: editOpen,
   });
   const openEdit = () => {
     if (!emp) return;
     setEditForm({
       firstName: emp.firstName,
       lastName: emp.lastName,
+      email: emp.email,
       phone: emp.phone,
-      gender: emp.gender,
+      joiningDate: emp.joinedOn,
       dateOfBirth: emp.dateOfBirth,
-      bloodGroup: emp.bloodGroup,
-      maritalStatus: emp.maritalStatus,
-      workLocation: emp.location,
+      employeeCode: emp.code,
+      gender: emp.gender,
+      departmentId: emp.departmentId ?? "",
+      designationId: emp.designationId ?? "",
       employmentType: emp.employmentType,
       status: emp.status,
+      bloodGroup: emp.bloodGroup,
+      maritalStatus: emp.maritalStatus,
+      location: emp.location,
       exitDate: emp.exitDate ?? "",
     });
+    setEditFieldErrors({});
     setEditOpen(true);
   };
+  function focusFirstEditInvalid(errors: Record<string, string>) {
+    const firstKey = Object.keys(errors)[0];
+    if (!firstKey) return;
+    document.getElementById(`edit-profile-${firstKey}`)?.focus();
+  }
+  const [lifecycle, setLifecycle] = useState<
+    null | "suspend" | "terminate" | "activate" | "reinstate"
+  >(null);
+  const statusToast = useRef<string | null>(null);
   const updateEmployee = useMutation({
     mutationFn: () => {
-      if (!emp) throw new Error("Profile is still loading.");
-      const phone = keptOrMobile(editForm.phone, emp.phone);
-      const gender = keptOrListed(editForm.gender, emp.gender, GENDERS);
-      const bloodGroup = keptOrListed(editForm.bloodGroup, emp.bloodGroup, BLOOD_GROUPS);
-      const maritalStatus = keptOrListed(
-        editForm.maritalStatus,
-        emp.maritalStatus,
-        MARITAL_STATUSES,
-      );
-      const profile = {
+      // Required fields are only checked for the ones this role can
+      // actually edit -- a read-only field left empty on an old record
+      // (e.g. no department set yet) must never block a plain employee's
+      // own save, since they have no way to fill it in from this dialog.
+      const errors: Record<string, string> = {};
+      const checkRequired = (key: keyof EmployeeFormValues, message: string) => {
+        if (editableFields && !editableFields.includes(key)) return;
+        if (!editForm[key].trim()) errors[key] = message;
+      };
+      checkRequired("firstName", "First name is required.");
+      checkRequired("lastName", "Last name is required.");
+      checkRequired("employeeCode", "Employee code is required.");
+      checkRequired("joiningDate", "Joining date is required.");
+      if (!editableFields || editableFields.includes("departmentId")) {
+        if (!editForm.departmentId) errors["departmentId"] = "Department is required.";
+        if ((editDesignations.data ?? []).length > 0 && !editForm.designationId) {
+          errors["designationId"] = "Designation is required.";
+        }
+      }
+      setEditFieldErrors(errors);
+      if (Object.keys(errors).length > 0) {
+        focusFirstEditInvalid(errors);
+        throw new Error("Fill in the required fields.");
+      }
+      if (
+        canChangeEmploymentStatus &&
+        (editForm.status === "terminated" || editForm.status === "suspended") &&
+        !editForm.exitDate.trim()
+      ) {
+        throw new Error("An exit date is required for this status.");
+      }
+      return employeeService.update(employeeId, {
         firstName: editForm.firstName,
         lastName: editForm.lastName,
+        phone: editForm.phone,
+        gender: editForm.gender,
         dateOfBirth: editForm.dateOfBirth,
-        workLocation: editForm.workLocation,
-        ...(phone !== undefined ? { phone } : {}),
-        ...(gender !== undefined ? { gender } : {}),
-        ...(bloodGroup !== undefined ? { bloodGroup } : {}),
-        ...(maritalStatus !== undefined ? { maritalStatus } : {}),
-      };
-      return employeeService.update(
-        employeeId,
-        canChangeEmploymentStatus
+        bloodGroup: editForm.bloodGroup,
+        maritalStatus: editForm.maritalStatus,
+        workLocation: editForm.location,
+        ...(canEditHrFields
           ? {
-              ...profile,
+              email: editForm.email,
+              employeeCode: editForm.employeeCode,
+              joiningDate: editForm.joiningDate,
+              departmentId: editForm.departmentId,
+              designationId: editForm.designationId,
               employmentType: editForm.employmentType,
-              status: editForm.status,
-              exitDate: editForm.exitDate,
             }
-          : {
-              ...profile,
-              ...(canEditHrFields ? { employmentType: editForm.employmentType } : {}),
-            },
-      );
+          : {}),
+        ...(canChangeEmploymentStatus
+          ? { status: editForm.status, exitDate: editForm.exitDate }
+          : {}),
+      });
     },
     onSuccess: () => {
       toast.success(statusToast.current ?? "Profile updated");
@@ -244,10 +259,17 @@ function EmployeeDetailPage() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.employees.detail(employeeId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.employees.all });
     },
-    onError: (e) =>
-      toast.error("Could not update profile", {
-        description: e instanceof Error ? e.message : "Supabase request failed.",
-      }),
+    onError: (e) => {
+      const message = e instanceof Error ? e.message : "Supabase request failed.";
+      if (/employee code is already in use/i.test(message)) {
+        setEditFieldErrors((current) => ({ ...current, employeeCode: message }));
+        focusFirstEditInvalid({ employeeCode: message });
+        return;
+      }
+      if (message !== "Fill in the required fields.") {
+        toast.error("Could not update profile", { description: message });
+      }
+    },
   });
   const reinstateEmployee = useMutation({
     mutationFn: () => employeeService.update(employeeId, { status: "active" }),
@@ -263,6 +285,7 @@ function EmployeeDetailPage() {
         description: e instanceof Error ? e.message : "Supabase request failed.",
       }),
   });
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const beginProfileSave = () => {
     if (!emp) return;
     if (!canChangeEmploymentStatus) {
@@ -585,168 +608,43 @@ function EmployeeDetailPage() {
       />
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit profile</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {(
-              [
-                ["firstName", "First name", "text"],
-                ["lastName", "Last name", "text"],
-              ] as const
-            ).map(([key, label, type]) => (
-              <div key={key} className="space-y-1">
-                <Label>{label}</Label>
-                <Input
-                  type={type}
-                  value={editForm[key]}
-                  onChange={(event) => setEditForm({ ...editForm, [key]: event.target.value })}
-                />
-              </div>
-            ))}
-            <div className="space-y-1">
-              <Label>Phone</Label>
-              <MobileInput
-                value={editForm.phone}
-                onChange={(event) => setEditForm({ ...editForm, phone: event.target.value })}
-              />
-            </div>
-            <ChoiceField
-              label="Gender"
-              value={editForm.gender}
-              options={GENDERS}
-              onChange={(gender) => setEditForm({ ...editForm, gender })}
-            />
-            <div className="space-y-1">
-              <Label>Date of birth</Label>
-              <Input
-                type="date"
-                value={editForm.dateOfBirth}
-                onChange={(event) => setEditForm({ ...editForm, dateOfBirth: event.target.value })}
-              />
-            </div>
-            <ChoiceField
-              label="Blood group"
-              value={editForm.bloodGroup}
-              options={BLOOD_GROUPS}
-              onChange={(bloodGroup) => setEditForm({ ...editForm, bloodGroup })}
-            />
-            <ChoiceField
-              label="Marital status"
-              value={editForm.maritalStatus}
-              options={MARITAL_STATUSES}
-              onChange={(maritalStatus) => setEditForm({ ...editForm, maritalStatus })}
-            />
-            <div className="space-y-1">
-              <Label>Location</Label>
-              <Input
-                value={editForm.workLocation}
-                onChange={(event) => setEditForm({ ...editForm, workLocation: event.target.value })}
-              />
-            </div>
-            {canEditHrFields ? (
-              <>
-                <div className="space-y-1">
-                  <Label>Employment type</Label>
-                  <select
-                    className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                    value={editForm.employmentType}
-                    onChange={(event) =>
-                      setEditForm({ ...editForm, employmentType: event.target.value })
-                    }
-                  >
-                    <option value="full-time">Full-time</option>
-                    <option value="part-time">Part-time</option>
-                    <option value="contract">Contract</option>
-                    <option value="intern">Intern</option>
-                  </select>
-                </div>
-                {canChangeEmploymentStatus ? (
-                  <>
-                    <div className="space-y-1">
-                      <Label>Status</Label>
-                      <select
-                        className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                        value={editForm.status}
-                        onChange={(event) => {
-                          const status = event.target.value;
-                          const needsExitDate =
-                            status === "resigned" ||
-                            status === "suspended" ||
-                            status === "terminated";
-                          setEditForm({
-                            ...editForm,
-                            status,
-                            exitDate:
-                              needsExitDate && !editForm.exitDate
-                                ? indiaDateKey()
-                                : editForm.exitDate,
-                          });
-                        }}
-                      >
-                        {emp.status === "terminated" ? null : (
-                          <option value="active">Active</option>
-                        )}
-                        <option value="probation">Probation</option>
-                        <option value="notice">Notice period</option>
-                        <option value="on-leave">On leave</option>
-                        <option value="resigned">Resigned</option>
-                        <option value="suspended">Suspended</option>
-                        <option value="terminated">Terminated</option>
-                        {[
-                          "active",
-                          "probation",
-                          "notice",
-                          "on-leave",
-                          "resigned",
-                          "suspended",
-                          "terminated",
-                        ].includes(editForm.status) ? null : (
-                          <option value={editForm.status}>{editForm.status}</option>
-                        )}
-                      </select>
-                    </div>
-                    {emp.status === "terminated" ? (
-                      <p className="text-xs text-muted-foreground sm:col-span-2">
-                        Active is not listed for a terminated employee. Use Reinstate to set them
-                        back to active. That keeps the exit date.
-                      </p>
-                    ) : null}
-                    {editForm.status === "resigned" ||
-                    editForm.status === "suspended" ||
-                    editForm.status === "terminated" ? (
-                      <div className="space-y-1">
-                        <Label>Exit date</Label>
-                        <Input
-                          type="date"
-                          required={editForm.status === "terminated"}
-                          value={editForm.exitDate}
-                          onChange={(event) =>
-                            setEditForm({ ...editForm, exitDate: event.target.value })
-                          }
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          {editForm.status === "terminated"
-                            ? "Required. Terminated employees cannot sign in, and the record is kept."
-                            : editForm.status === "suspended"
-                              ? "Filled with today in India time when empty. Setting them back to active clears it."
-                              : "Used for Joiners vs exits and attrition reporting on the Dashboard."}
-                        </p>
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground sm:col-span-2">
-                    Another administrator or HR must change your employment status.
-                  </p>
-                )}
-              </>
-            ) : null}
-          </div>
-          {!canEditHrFields ? (
+          <EmployeeFormFields
+            idPrefix="edit-profile"
+            mode="edit"
+            values={editForm}
+            onChange={(next) => {
+              setEditForm(next);
+              const changedKeys = Object.keys(editFieldErrors).filter(
+                (key) =>
+                  editFieldErrors[key] &&
+                  next[key as keyof EmployeeFormValues] !==
+                    editForm[key as keyof EmployeeFormValues],
+              );
+              if (changedKeys.length > 0) {
+                const cleared = { ...editFieldErrors };
+                changedKeys.forEach((key) => (cleared[key] = ""));
+                setEditFieldErrors(cleared);
+              }
+            }}
+            errors={editFieldErrors}
+            departments={editDepartments.data ?? []}
+            designations={editDesignations.data ?? []}
+            designationsError={editDesignations.isError}
+            {...(editableFields ? { editableFields } : {})}
+          />
+          {!canChangeEmploymentStatus && canEditHrFields ? (
             <p className="text-xs text-muted-foreground">
-              Employment type and status are managed by HR/Admin.
+              Another administrator or HR must change your own employment status.
+            </p>
+          ) : null}
+          {emp.status === "terminated" && canChangeEmploymentStatus ? (
+            <p className="text-xs text-muted-foreground">
+              Active is not listed for a terminated employee. Use Reinstate to set them back to
+              active. That keeps the exit date.
             </p>
           ) : null}
           <DialogFooter>

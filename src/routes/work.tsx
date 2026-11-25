@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Eye, ListChecks, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Calendar as CalendarIcon, Check, Eye, ListChecks, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { IconAction } from "@/components/common/IconAction";
@@ -21,8 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -43,12 +45,13 @@ import {
   DWR_PASTE_BLOCKED_MESSAGE,
   isBlockedDescriptionInputType,
 } from "@/lib/dwr-ai-guard";
-import { shiftBounds, submitPhase, type SubmitPhase } from "@/lib/dwr-window";
-import { indiaDateKey, indianTime, shortDate } from "@/lib/format";
+import { indiaDateKey, shortDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { workService } from "@/services/workService";
 import type {
   DailyWorkReport,
   DwrItemStatus,
+  DwrStatus,
   TaskPriority,
   TaskStatus,
   WorkTask,
@@ -62,6 +65,14 @@ export const Route = createFileRoute("/work")({
 
 const itemStatuses = ["todo", "in-progress", "blocked", "done"] as const;
 const priorities = ["low", "medium", "high", "urgent"] as const;
+
+/** Strips tags for an emptiness check only -- never used to store or render content. */
+function stripHtmlForEmptinessCheck(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+}
 
 const reportSchema = z
   .object({
@@ -87,6 +98,13 @@ const reportSchema = z
       .min(1, "Add at least one line."),
   })
   .superRefine((value, ctx) => {
+    if (stripHtmlForEmptinessCheck(value.summaryHtml) === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Day summary is required.",
+        path: ["summaryHtml"],
+      });
+    }
     if (!value.linkTasks) return;
     value.items.forEach((item, index) => {
       if (!item.taskId && !item.isUnplanned) {
@@ -128,38 +146,273 @@ function emptyItem(): ReportFormValues["items"][number] {
   return { taskId: "", description: "", hours: 1, itemStatus: "done", isUnplanned: false };
 }
 
+const DWR_STATUS_DOT: Record<DwrStatus, string> = {
+  draft: "bg-muted-foreground",
+  submitted: "bg-success",
+  late: "bg-warning",
+  missed: "bg-destructive",
+};
+
+const DWR_STATUS_MODIFIER_CLASSNAMES: Record<DwrStatus, string> = {
+  draft:
+    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-muted-foreground after:content-['']",
+  submitted:
+    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-success after:content-['']",
+  late:
+    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
+  missed:
+    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
+};
+
+/** Shared by both the left-side date picker and the right-side calendar. */
+function useReportStatusByDate(reports: DailyWorkReport[], me: string) {
+  return useMemo(() => {
+    const map = new Map<string, DwrStatus>();
+    for (const report of reports) {
+      if (report.employeeId === me) map.set(report.reportDate, report.status);
+    }
+    return map;
+  }, [reports, me]);
+}
+
+function reportStatusModifiers(byDate: Map<string, DwrStatus>) {
+  return {
+    draft: (date: Date) => byDate.get(indiaDateKey(date)) === "draft",
+    submitted: (date: Date) => byDate.get(indiaDateKey(date)) === "submitted",
+    late: (date: Date) => byDate.get(indiaDateKey(date)) === "late",
+    missed: (date: Date) => byDate.get(indiaDateKey(date)) === "missed",
+  };
+}
+
+function ReportStatusLegend() {
+  return (
+    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1">
+        <span className="size-1.5 rounded-full bg-success" /> Submitted
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="size-1.5 rounded-full bg-warning" /> Late
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="size-1.5 rounded-full bg-destructive" /> Missed
+      </span>
+      <span className="flex items-center gap-1">
+        <span className="size-1.5 rounded-full bg-muted-foreground" /> Draft
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Calendar-based date selector for the end-of-day report (requirement 4),
+ * replacing the long vertical "My reports" list. Also the only way the
+ * report date changes now (requirement 1's fix): a calendar day click
+ * always commits one complete, valid date, unlike a free-typed
+ * <input type="date">, whose browser-cleared "" on an out-of-range manual
+ * entry was wiping the whole form through the load effect in
+ * ReportsPanel. Future dates are disabled outright; a past date with no
+ * existing report is selectable (so its "no report yet" state is visible
+ * before deciding to look elsewhere) but ReportsPanel's own date-based
+ * restriction still prevents creating a NEW report there -- this
+ * component only controls which date is selected, not what you can save
+ * for it.
+ */
+function ReportDatePicker({
+  value,
+  today,
+  onSelect,
+  reports,
+  me,
+}: {
+  value: string;
+  today: string;
+  onSelect: (date: string) => void;
+  reports: DailyWorkReport[];
+  me: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const byDate = useMemo(() => {
+    const map = new Map<string, DwrStatus>();
+    for (const report of reports) {
+      if (report.employeeId === me) map.set(report.reportDate, report.status);
+    }
+    return map;
+  }, [reports, me]);
+
+  const selectedDate = new Date(`${value}T00:00:00`);
+  const todayDate = new Date(`${today}T00:00:00`);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          id="report-date"
+          className="w-fit justify-start gap-2 font-normal"
+        >
+          <CalendarIcon className="size-4" />
+          {shortDate(value)}
+          {byDate.has(value) ? (
+            <span className={cn("ml-auto size-2 rounded-full", DWR_STATUS_DOT[byDate.get(value)!])} />
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          captionLayout="dropdown"
+          selected={selectedDate}
+          defaultMonth={selectedDate}
+          // Only today is writable/selectable here -- a new report can
+          // only be created/submitted for today, and an existing past
+          // report opens read-only from the right-side list instead, not
+          // through this picker.
+          disabled={(date) => indiaDateKey(date) !== today}
+          onSelect={(date) => {
+            if (!date) return;
+            onSelect(indiaDateKey(date));
+            setOpen(false);
+          }}
+          modifiers={{
+            draft: (date) => byDate.get(indiaDateKey(date)) === "draft",
+            submitted: (date) => byDate.get(indiaDateKey(date)) === "submitted",
+            late: (date) => byDate.get(indiaDateKey(date)) === "late",
+            missed: (date) => byDate.get(indiaDateKey(date)) === "missed",
+          }}
+          modifiersClassNames={{
+            draft: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-muted-foreground after:content-['']",
+            submitted: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-success after:content-['']",
+            late: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
+            missed: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
+          }}
+        />
+        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-success" /> Submitted
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-warning" /> Late
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-destructive" /> Missed
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="size-1.5 rounded-full bg-muted-foreground" /> Draft
+          </span>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Always-visible month/year calendar for the RIGHT-SIDE "Recent reports"
+ * section, shown above its existing list -- separate from, and does not
+ * touch, the left-side ReportDatePicker (which stays exactly as it is,
+ * inside its own popover, driving the form). Selecting a date here sets
+ * the same reportDate, which the existing load-into-form effect already
+ * resolves into the left-side form.
+ */
+function RecentReportsCalendar({
+  value,
+  today,
+  onSelectDate,
+  reports,
+  me,
+}: {
+  value: string;
+  today: string;
+  /** Today's date -> load into the editable form; a past date -> open read-only. */
+  onSelectDate: (date: string) => void;
+  reports: DailyWorkReport[];
+  me: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const byDate = useReportStatusByDate(reports, me);
+  const selectedDate = new Date(`${value}T00:00:00`);
+  const todayDate = new Date(`${today}T00:00:00`);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="w-fit justify-start gap-2 font-normal">
+          <CalendarIcon className="size-4" />
+          {shortDate(value)}
+          {byDate.has(value) ? (
+            <span className={cn("ml-auto size-2 rounded-full", DWR_STATUS_DOT[byDate.get(value)!])} />
+          ) : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start">
+        <Calendar
+          mode="single"
+          captionLayout="dropdown"
+          selected={selectedDate}
+          defaultMonth={selectedDate}
+          disabled={{ after: todayDate }}
+          onSelect={(date) => {
+            if (!date) return;
+            onSelectDate(indiaDateKey(date));
+            setOpen(false);
+          }}
+          modifiers={reportStatusModifiers(byDate)}
+          modifiersClassNames={DWR_STATUS_MODIFIER_CLASSNAMES}
+        />
+        <div className="border-t px-3 py-2">
+          <ReportStatusLegend />
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function rejectDescriptionInsert(event: { preventDefault: () => void }) {
   event.preventDefault();
   if (claimPasteBlockNotice()) toast.error(DWR_PASTE_BLOCKED_MESSAGE);
 }
 
-function rejectDescriptionBeforeInput(event: FormEvent<HTMLInputElement>) {
+function rejectDescriptionBeforeInput(event: FormEvent<HTMLTextAreaElement>) {
   const native = event.nativeEvent;
   if (!(native instanceof InputEvent) || !isBlockedDescriptionInputType(native.inputType)) return;
   rejectDescriptionInsert(event);
 }
 
-function rejectDescriptionDrop(event: DragEvent<HTMLInputElement>) {
+function rejectDescriptionDrop(event: DragEvent<HTMLTextAreaElement>) {
   rejectDescriptionInsert(event);
 }
 
-function phaseCopy(phase: SubmitPhase, opensAt: Date, closesAt: Date) {
-  if (phase === "before-window") {
-    return "Drafts can be saved now. You can submit anytime.";
-  }
-  if (phase === "on-time")
-    return "The submission window is open. A report submitted now is on time.";
-  if (phase === "late")
-    return `This submission will be marked late. The window closes at ${indianTime(closesAt)} IST.`;
-  return "The window closed at 10:00 IST. A missing report is marked missed.";
+/** IST hour/minute "now," for the simple fixed-time submission-status subtitle below. */
+function nowIstMinutes(): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return hour * 60 + minute;
+}
+
+/**
+ * Submitted up to 7:00 PM IST, Late from 7:00 PM to 11:59 PM, Missed once
+ * the report date itself is over -- a fixed, time-of-day rule, no longer
+ * tied to each employee's own shift end (the old "window opens 30
+ * minutes before your shift ends" model this replaces).
+ */
+function submissionTimingCopy(): string {
+  const minutes = nowIstMinutes();
+  if (minutes < 19 * 60) return "Submit now and it will show as Submitted (before 7:00 PM IST).";
+  return "It's past 7:00 PM IST -- submitting now will show as Late, not Missed.";
 }
 
 const REPORT_STATUS_HELP = (
   <div className="space-y-1">
     <p>Draft: saved, not submitted yet.</p>
-    <p>Submitted: sent inside the on-time window, which opens 30 minutes before the shift ends.</p>
-    <p>Late: sent after that window and before 10:00 IST.</p>
-    <p>Missed: nothing was submitted by 10:00 IST. HR can waive a missed report.</p>
+    <p>Submitted: sent by 7:00 PM IST on the report date.</p>
+    <p>Late: sent after 7:00 PM and by 11:59 PM IST on the report date.</p>
+    <p>Missed: nothing was submitted by the end of the report date, including an unsubmitted draft.</p>
   </div>
 );
 
@@ -558,6 +811,7 @@ function ReportsPanel() {
     queryFn: () => workService.listReports(),
   });
   const [viewing, setViewing] = useState<DailyWorkReport | null>(null);
+  const [deleting, setDeleting] = useState<DailyWorkReport | null>(null);
   const today = indiaDateKey();
   const form = useForm<ReportFormValues>({
     resolver: zodResolver(reportSchema),
@@ -572,9 +826,6 @@ function ReportsPanel() {
   });
   const items = useFieldArray({ control: form.control, name: "items" });
   const reportDate = form.watch("reportDate");
-  const shift = context.data?.shift;
-  const bounds = shift ? shiftBounds(reportDate || today, shift) : null;
-  const phase = shift && reportDate ? submitPhase(new Date(), reportDate, shift) : "before-window";
   const openTasks = (tasks.data ?? []).filter(
     (task) =>
       task.assignedTo === me &&
@@ -585,11 +836,21 @@ function ReportsPanel() {
     (report) => report.employeeId === me && report.reportDate === reportDate,
   );
   const locked = existing?.reviewStatus === "approved" || existing?.status === "missed";
+  // A new report can only be created for today -- this blocks only the
+  // Save/Submit actions for that specific dead-end case (no existing
+  // report, a date that isn't today), never any input field. Editing an
+  // existing report, at any date, is never affected.
+  const invalidNewReportDate = !existing && reportDate !== today;
   useEffect(() => {
     form.setValue("linkTasks", openTasks.length > 0);
   }, [form, openTasks.length]);
 
   useEffect(() => {
+    // Defensive: never reset the whole form over an incomplete/invalid
+    // date. The calendar picker only ever commits one complete date, so
+    // this should not fire in practice, but it keeps this effect from
+    // ever wiping other fields if reportDate is transiently "" or malformed.
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(reportDate)) return;
     const saved = (reports.data ?? []).find(
       (report) => report.employeeId === me && report.reportDate === reportDate,
     );
@@ -632,10 +893,24 @@ function ReportsPanel() {
   const save = useMutation({
     mutationFn: (values: ReportFormValues) => workService.saveDraft(toPayload(values)),
     onSuccess: () => {
-      toast.success("Draft saved");
+      toast.success(
+        existing && (existing.status === "submitted" || existing.status === "late")
+          ? "Changes saved"
+          : "Draft saved",
+      );
       invalidate();
     },
-    onError: (error) => toast.error("Could not save the draft", { description: messageOf(error) }),
+    onError: (error) => toast.error("Could not save", { description: messageOf(error) }),
+  });
+  const deleteReport = useMutation({
+    mutationFn: (reportId: string) => workService.deleteReport(reportId),
+    onSuccess: () => {
+      toast.success("Report deleted");
+      setDeleting(null);
+      invalidate();
+    },
+    onError: (error) =>
+      toast.error("Could not delete the report", { description: messageOf(error) }),
   });
   const submit = useMutation({
     mutationFn: (values: ReportFormValues) => workService.submitReport(toPayload(values)),
@@ -653,13 +928,7 @@ function ReportsPanel() {
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
       <SectionCard
         title="End-of-day report"
-        description={
-          context.isError
-            ? messageOf(context.error)
-            : bounds
-              ? phaseCopy(phase, bounds.windowOpensAt, bounds.lateClosesAt)
-              : "Loading your shift."
-        }
+        description={context.isError ? messageOf(context.error) : submissionTimingCopy()}
         action={
           existing ? (
             <span className="inline-flex items-center gap-1.5">
@@ -682,7 +951,30 @@ function ReportsPanel() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="report-date">Report date</Label>
-              <Input id="report-date" type="date" {...form.register("reportDate")} />
+              {/* A calendar picker, not a free-typed date input: typing an
+                  out-of-range value into a native <input type="date">
+                  makes the browser silently clear it to "", which was
+                  wiping the whole form via the load-effect below. Picking
+                  a day from the calendar always yields one complete,
+                  valid date, so that failure mode can't happen here. */}
+              <ReportDatePicker
+                value={reportDate || today}
+                today={today}
+                onSelect={(date) => form.setValue("reportDate", date)}
+                reports={reports.data ?? []}
+                me={me}
+              />
+              {invalidNewReportDate ? (
+                <p className="text-xs text-warning">
+                  No report exists for this date, and new reports can only be created for today
+                  ({shortDate(today)}). Pick today, or a date that already has a report, to
+                  continue.
+                </p>
+              ) : !existing ? (
+                <p className="text-xs text-muted-foreground">
+                  New reports can only be created for today.
+                </p>
+              ) : null}
             </div>
           </div>
           {openTasks.length > 0 ? (
@@ -772,7 +1064,8 @@ function ReportsPanel() {
                       Type in your own words. Pasting or AI-generated text is blocked.
                     </InfoHint>
                   </div>
-                  <Input
+                  <Textarea
+                    rows={3}
                     {...form.register(`items.${index}.description`)}
                     disabled={locked}
                     onBeforeInput={rejectDescriptionBeforeInput}
@@ -780,6 +1073,11 @@ function ReportsPanel() {
                     onDrop={rejectDescriptionDrop}
                     onPaste={rejectDescriptionInsert}
                   />
+                  {form.formState.errors.items?.[index]?.description ? (
+                    <p className="text-xs text-destructive">
+                      {form.formState.errors.items[index]?.description?.message}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Hours</Label>
@@ -818,8 +1116,19 @@ function ReportsPanel() {
                   variant="ghost"
                   size="icon"
                   className="self-end"
-                  disabled={locked || items.fields.length === 1}
-                  onClick={() => items.remove(index)}
+                  disabled={locked}
+                  onClick={() => {
+                    // The delete icon is enabled on the very first/only
+                    // row too, immediately -- but the form must never end
+                    // up with zero lines, so removing the last one
+                    // replaces it with a fresh empty line instead of
+                    // leaving none.
+                    if (items.fields.length === 1) {
+                      items.replace([emptyItem()]);
+                    } else {
+                      items.remove(index);
+                    }
+                  }}
                 >
                   <Trash2 className="size-4" />
                 </Button>
@@ -849,13 +1158,21 @@ function ReportsPanel() {
             <p className="text-sm text-destructive">{form.formState.errors.items.message}</p>
           ) : null}
           <div className="grid gap-1.5">
-            <Label>Day summary (optional)</Label>
+            <Label>Day summary</Label>
             <RichTextEditor
               value={form.watch("summaryHtml")}
-              onChange={(html) => form.setValue("summaryHtml", html, { shouldDirty: true })}
+              onChange={(html) => {
+                form.setValue("summaryHtml", html, { shouldDirty: true });
+                if (form.formState.errors.summaryHtml) void form.trigger("summaryHtml");
+              }}
               disabled={locked}
               placeholder="Summary of the day"
             />
+            {form.formState.errors.summaryHtml ? (
+              <p className="text-xs text-destructive">
+                {form.formState.errors.summaryHtml.message}
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1.5">
@@ -877,44 +1194,105 @@ function ReportsPanel() {
             <Button
               type="button"
               variant="outline"
-              disabled={locked || save.isPending}
+              disabled={locked || invalidNewReportDate || save.isPending}
               onClick={() => void form.handleSubmit((values) => save.mutate(values))()}
             >
-              Save draft
+              {/* Already submitted/late: this call still goes through
+                  saveDraft() (p_submit = false), which preserves that
+                  status instead of resetting it to "draft" -- editing an
+                  existing report never requires resubmitting it. Only the
+                  label changes to say what's actually happening. */}
+              {existing && (existing.status === "submitted" || existing.status === "late")
+                ? "Save changes"
+                : "Save draft"}
             </Button>
-            <Button type="submit" disabled={!canSubmit || submit.isPending}>
+            <Button type="submit" disabled={!canSubmit || invalidNewReportDate || submit.isPending}>
               Submit report
             </Button>
+            {existing ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive hover:text-destructive"
+                disabled={locked || deleteReport.isPending}
+                onClick={() => setDeleting(existing)}
+              >
+                <Trash2 className="size-4" /> Delete report
+              </Button>
+            ) : null}
           </div>
         </form>
       </SectionCard>
       <SectionCard
         title={
           <span className="inline-flex items-center gap-1.5">
-            My reports
+            Recent reports
             <ReportStatusHint />
             <ReviewStatusHint />
           </span>
         }
-        description="Submitted, late, and missed days."
+        description="Pick a date below, or use the list for your 10 most recent days."
       >
-        <div className="space-y-2">
+        <RecentReportsCalendar
+          value={reportDate || today}
+          today={today}
+          onSelectDate={(date) => {
+            // Today -> load into the editable form to continue/submit.
+            // A past date -> open it read-only instead (the editable form
+            // is reserved for today only); the existing viewer dialog
+            // already shows a past report's full saved data.
+            if (date === today) {
+              form.setValue("reportDate", date);
+              return;
+            }
+            const past = (reports.data ?? []).find(
+              (report) => report.employeeId === me && report.reportDate === date,
+            );
+            if (past) setViewing(past);
+          }}
+          reports={reports.data ?? []}
+          me={me}
+        />
+        <div className="mt-4 space-y-2">
           {(reports.data ?? [])
             .filter((report) => report.employeeId === me)
+            .slice(0, 10)
             .map((report) => (
-              <button
+              <div
                 key={report.id}
-                type="button"
-                className="flex w-full items-center justify-between rounded-md border px-3 py-2 text-left"
-                onClick={() => setViewing(report)}
+                className="flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2"
               >
-                <span className="text-sm">{shortDate(report.reportDate)}</span>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 text-left"
+                  onClick={() => {
+                    // Today's own report (including a same-day draft) ->
+                    // load into the editable form above to continue and
+                    // submit later the same day. A past report opens
+                    // read-only instead -- see RecentReportsCalendar's
+                    // onSelectDate for the same rule.
+                    if (report.reportDate === today) {
+                      form.setValue("reportDate", report.reportDate);
+                    } else {
+                      setViewing(report);
+                    }
+                  }}
+                >
+                  <span className="text-sm">{shortDate(report.reportDate)}</span>
+                </button>
                 <span className="flex items-center gap-2">
                   {report.escalated ? <StatusBadge status="escalated" tone="warning" /> : null}
                   <StatusBadge status={report.reviewStatus} />
                   <StatusBadge status={report.status} />
+                  <IconAction
+                    label={`View ${shortDate(report.reportDate)} details`}
+                    variant="ghost"
+                    onClick={() => setViewing(report)}
+                  >
+                    <Eye />
+                  </IconAction>
                 </span>
-              </button>
+              </div>
             ))}
           {(reports.data ?? []).filter((report) => report.employeeId === me).length === 0 ? (
             <p className="text-sm text-muted-foreground">No reports yet.</p>
@@ -922,6 +1300,38 @@ function ReportsPanel() {
         </div>
       </SectionCard>
       <WorkReportDetailDialog report={viewing} readOnly onClose={() => setViewing(null)} />
+      <Dialog open={deleting !== null} onOpenChange={(open) => !open && setDeleting(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this report?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {deleting
+              ? `This permanently deletes your ${shortDate(deleting.reportDate)} report and its line items. This cannot be undone.`
+              : ""}
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setDeleting(null)}
+              disabled={deleteReport.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleteReport.isPending}
+              onClick={() => {
+                if (deleting) deleteReport.mutate(deleting.id);
+              }}
+            >
+              {deleteReport.isPending ? "Deleting…" : "Delete report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

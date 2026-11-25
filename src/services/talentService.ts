@@ -345,6 +345,36 @@ export const talentService = {
     if (error) throw toActionableSupabaseError(error);
   },
   /**
+   * Employee's own edit of a self-created goal's Title, Description,
+   * Target, Link to KRA, Due date and Weight -- never progress, status, or
+   * review fields (see update_own_goal in the pending migration for why a
+   * new RPC is needed instead of a self-update RLS policy, and for the
+   * "blocked once completed" rule carried over from submit_goal_progress).
+   */
+  async updateOwnGoal(
+    goalId: string,
+    input: {
+      title: string;
+      description?: string;
+      target?: string;
+      dueDate?: string;
+      weight?: number;
+      kraId?: string | null;
+    },
+  ) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await untypedDb().rpc("update_own_goal", {
+      p_goal_id: goalId,
+      p_title: input.title.trim(),
+      p_description: input.description?.trim() || null,
+      p_target: input.target?.trim() || null,
+      p_due_date: input.dueDate || null,
+      p_weight: input.weight ?? null,
+      p_kra_id: input.kraId || null,
+    });
+    if (error) throw toActionableSupabaseError(error);
+  },
+  /**
    * Reviewer (manager/dept head/admin/hr) action: approve/override a
    * goal's status with a required reason, verify completion (which also
    * sets progress to 100 so the two can never disagree), or apply a

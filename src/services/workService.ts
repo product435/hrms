@@ -410,6 +410,13 @@ export const workService = {
     return { id: String(body.id ?? ""), status: body.status ?? "submitted" };
   },
 
+  /** Deletes an existing report (and, via cascade, its line items). Self-service only. */
+  async deleteReport(reportId: string): Promise<void> {
+    const db = database();
+    const { error } = await db.rpc("delete_dwr_report", { p_report_id: reportId });
+    if (error) throw error;
+  },
+
   async reviewReport(
     reportId: string,
     decision: "approved" | "needs-revision",

@@ -37,7 +37,9 @@ export interface Employee {
   phone: string;
   avatarUrl?: string;
   department: string;
+  departmentId?: string;
   designation: string;
+  designationId?: string;
   role: Role;
   managerName: string | null;
   location: string;

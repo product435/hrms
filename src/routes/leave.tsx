@@ -10,6 +10,7 @@ import { SectionCard } from "@/components/common/SectionCard";
 import { InfoHint } from "@/components/common/InfoHint";
 import { StatCard } from "@/components/common/StatCard";
 import { DataTable, type Column } from "@/components/common/DataTable";
+import { DateRangeFilter, type DateRange } from "@/components/common/DateRangeFilter";
 import { FilterBar } from "@/components/common/FilterBar";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,8 @@ function LeavePage() {
   const [rejectTarget, setRejectTarget] = useState<LeaveRequest | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
+  const [ledgerRange, setLedgerRange] = useState<DateRange>({ from: "", to: "" });
+  const [recordsRange, setRecordsRange] = useState<DateRange>({ from: "", to: "" });
   const leaveTypes = useQuery({ queryKey: ["leave-types"], queryFn: () => leaveService.types() });
   useEffect(() => {
     const firstType = leaveTypes.data?.[0]?.name;
@@ -278,6 +281,30 @@ function LeavePage() {
 
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
 
+  // Date range filters are applied client-side on top of the existing
+  // search/status query so they combine with both without a refetch, and
+  // only change what's shown once "Apply" has set ledgerRange/recordsRange
+  // -- picking a date alone never re-filters. From/To are independent: only
+  // From = that date onwards, only To = up to that date, both inclusive.
+  // "Falls in the selection" for records = the request's own date range
+  // overlaps the picked range, not just its start date.
+  const visibleRequests = useMemo(() => {
+    return (requests.data ?? []).filter((row) => {
+      if (recordsRange.from && row.to < recordsRange.from) return false;
+      if (recordsRange.to && row.from > recordsRange.to) return false;
+      return true;
+    });
+  }, [requests.data, recordsRange]);
+
+  const visibleLedger = useMemo(() => {
+    return (ledger.data ?? []).filter((entry) => {
+      const day = entry.createdAt.slice(0, 10);
+      if (ledgerRange.from && day < ledgerRange.from) return false;
+      if (ledgerRange.to && day > ledgerRange.to) return false;
+      return true;
+    });
+  }, [ledger.data, ledgerRange]);
+
   return (
     <AppLayout>
       <PageHeader
@@ -406,9 +433,22 @@ function LeavePage() {
           title="Leave ledger"
           description="Your balance transaction history"
           bodyClassName="divide-y divide-border p-0"
+          action={
+            <DateRangeFilter
+              from={ledgerRange.from}
+              to={ledgerRange.to}
+              onApply={(from, to) => setLedgerRange({ from, to })}
+              onClear={() => setLedgerRange({ from: "", to: "" })}
+            />
+          }
         >
+          {visibleLedger.length === 0 ? (
+            <p className="px-5 py-6 text-center text-sm text-muted-foreground">
+              No ledger entries in this range.
+            </p>
+          ) : (
           <ul>
-            {ledger.data!.slice(0, 8).map((entry) => (
+            {visibleLedger.slice(0, 8).map((entry) => (
               <li
                 key={entry.id}
                 className="flex items-center justify-between gap-3 px-5 py-3 text-sm"
@@ -432,19 +472,20 @@ function LeavePage() {
               </li>
             ))}
           </ul>
+          )}
         </SectionCard>
       ) : null}
 
       <DataTable
         columns={columns}
-        rows={requests.data}
+        rows={visibleRequests}
         rowKey={(row) => row.id}
         isLoading={requests.isLoading}
         isError={requests.isError}
         onRetry={() => requests.refetch()}
         emptyTitle="No leave requests"
         emptyDescription="Applications will show up here once submitted."
-        caption={`${requests.data?.length ?? 0} requests`}
+        caption={`${visibleRequests.length} requests`}
         toolbar={
           <FilterBar
             search={search}
@@ -465,6 +506,14 @@ function LeavePage() {
                 ],
               },
             ]}
+            actions={
+              <DateRangeFilter
+                from={recordsRange.from}
+                to={recordsRange.to}
+                onApply={(from, to) => setRecordsRange({ from, to })}
+                onClear={() => setRecordsRange({ from: "", to: "" })}
+              />
+            }
           />
         }
       />

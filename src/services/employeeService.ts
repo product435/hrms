@@ -118,7 +118,9 @@ function mapEmployee(row: any): Employee {
     phone: row.phone ?? "",
     avatarUrl: row.profiles?.avatar_url ?? undefined,
     department,
+    departmentId: row.department_id ?? "",
     designation,
+    designationId: row.designation_id ?? "",
     role: normalizeRole(row.profiles?.role) ?? "employee",
     managerName: row.manager
       ? `${row.manager.first_name ?? ""} ${row.manager.last_name ?? ""}`.trim()
@@ -258,6 +260,9 @@ export const employeeService = {
     input: {
       firstName?: string;
       lastName?: string;
+      email?: string;
+      employeeCode?: string;
+      joiningDate?: string;
       phone?: string;
       gender?: string;
       dateOfBirth?: string;
@@ -277,6 +282,37 @@ export const employeeService = {
     },
   ) {
     if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    let email: string | undefined;
+    if (input.email !== undefined) {
+      email = input.email.trim().toLowerCase();
+      if (!emailHasDomain(email)) throw new Error("Enter a valid work email.");
+      const duplicateEmail = await supabase
+        .from("employees")
+        .select("id")
+        .ilike("email", exactIlike(email))
+        .neq("id", id)
+        .limit(1);
+      if (duplicateEmail.error) throw duplicateEmail.error;
+      if ((duplicateEmail.data ?? []).length > 0) {
+        throw new Error("An employee with this work email already exists.");
+      }
+    }
+    if (input.employeeCode !== undefined) {
+      const employeeCode = input.employeeCode.trim();
+      if (!/^JV-[0-9]+$/.test(employeeCode)) {
+        throw new Error('Employee code must be "JV-" followed by digits, e.g. JV-91.');
+      }
+      const duplicateCode = await supabase
+        .from("employees")
+        .select("id")
+        .eq("employee_code", employeeCode)
+        .neq("id", id)
+        .limit(1);
+      if (duplicateCode.error) throw duplicateCode.error;
+      if ((duplicateCode.data ?? []).length > 0) {
+        throw new Error("That employee code is already in use.");
+      }
+    }
     const nextStatus = input.status?.trim();
     let previousStatus: string | null = null;
     let previousExit: string | null = null;
@@ -308,6 +344,11 @@ export const employeeService = {
       .update({
         ...(input.firstName !== undefined ? { first_name: input.firstName.trim() } : {}),
         ...(input.lastName !== undefined ? { last_name: input.lastName.trim() } : {}),
+        ...(email !== undefined ? { email } : {}),
+        ...(input.employeeCode !== undefined
+          ? { employee_code: input.employeeCode.trim() }
+          : {}),
+        ...(input.joiningDate !== undefined ? { joining_date: input.joiningDate || null } : {}),
         ...(phone !== undefined ? { phone } : {}),
         ...(gender !== undefined ? { gender } : {}),
         ...(input.dateOfBirth !== undefined ? { date_of_birth: input.dateOfBirth || null } : {}),
@@ -327,7 +368,7 @@ export const employeeService = {
       .eq("id", id)
       .select("id")
       .maybeSingle();
-    if (error) throw error;
+    if (error) throw duplicateEmployeeMessage(error) ?? error;
     if (!data) throw new Error("You do not have permission to update this employee.");
     void logAudit(
       "employee_update",

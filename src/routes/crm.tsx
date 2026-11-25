@@ -314,6 +314,7 @@ function CrmPage() {
             query={leads}
             me={me}
             canManageAll={crm.canManageAll}
+            showTeam={crm.canManageAll || !crm.canWrite}
             canEdit={canEdit}
             onEdit={(record) => setEditing({ kind: "lead", record })}
             onConvert={setConverting}
@@ -340,6 +341,7 @@ function CrmPage() {
             deals={shared.deals}
             query={deals}
             me={me}
+            showTeam={crm.canManageAll || !crm.canWrite}
             canEdit={canEdit}
             onEdit={(record) => setEditing({ kind: "deal", record })}
             onDelete={(deal) => setDeleting({ kind: "deal", id: deal.id, name: deal.name })}
@@ -381,6 +383,7 @@ function CrmPage() {
             activities={shared.activities}
             query={activities}
             me={me}
+            showTeam={crm.canManageAll || !crm.canWrite}
             canEdit={canEdit}
             onEdit={(record) => setEditing({ kind: "activity", record })}
             onDelete={(activity) =>
@@ -530,7 +533,7 @@ function OverviewTab({
   const [rangeTo, setRangeTo] = useState("");
   const [draftFrom, setDraftFrom] = useState("");
   const [draftTo, setDraftTo] = useState("");
-  const [ownerFilter, setOwnerFilter] = useState(ALL);
+  const [ownerFilter, setOwnerFilter] = useState(showTeam ? ALL : me);
 
   const applyQuickRange = (from: string, to: string) => {
     setRangeFrom(from);
@@ -698,19 +701,21 @@ function OverviewTab({
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <select
-          aria-label="Salesperson"
-          className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-[200px]"
-          value={ownerFilter}
-          onChange={(e) => setOwnerFilter(e.target.value)}
-        >
-          <option value={ALL}>All salespeople</option>
-          {owners.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+        {showTeam ? (
+          <select
+            aria-label="Salesperson"
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-[200px]"
+            value={ownerFilter}
+            onChange={(e) => setOwnerFilter(e.target.value)}
+          >
+            <option value={ALL}>All salespeople</option>
+            {owners.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <div className="flex gap-1.5">
           <Button variant="outline" size="sm" onClick={() => applyQuickRange(today, today)}>
             Today
@@ -1878,6 +1883,7 @@ function LeadsTab({
   query,
   me,
   canManageAll,
+  showTeam,
   canEdit,
   onEdit,
   onConvert,
@@ -1891,6 +1897,7 @@ function LeadsTab({
   query: QueryState;
   me: string;
   canManageAll: boolean;
+  showTeam: boolean;
   canEdit: (ownerId: string) => boolean;
   onEdit: (lead: CrmLead) => void;
   onConvert: (lead: CrmLead) => void;
@@ -1901,7 +1908,12 @@ function LeadsTab({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(ALL);
   const [rating, setRating] = useState(ALL);
-  const [owner, setOwner] = useState(ALL);
+  // A rep with no team/org-wide access never gets the Owner filter shown
+  // (see the FilterBar below) and the row filter below must agree with
+  // that even though the owner dropdown is hidden -- otherwise hiding the
+  // control alone would do nothing, since the underlying rows prop may
+  // still include other people's leads until the backend RLS fix lands.
+  const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const [whatsappLead, setWhatsappLead] = useState<CrmLead | null>(null);
   const [callLead, setCallLead] = useState<CrmLead | null>(null);
   const needle = search.trim().toLowerCase();
@@ -1913,7 +1925,7 @@ function LeadsTab({
       !matchesListingRatingRange(lead.listingRating, rating as ListingRatingRange)
     )
       return false;
-    if (!matchesOwner(lead.ownerId, owner, me)) return false;
+    if (!matchesOwner(lead.ownerId, showTeam ? owner : MINE, me)) return false;
     if (!needle) return true;
     return [lead.firstName, lead.lastName, lead.company, lead.email, lead.phone].some((value) =>
       value.toLowerCase().includes(needle),
@@ -2146,13 +2158,17 @@ function LeadsTab({
             onChange: setRating,
             options: [{ value: ALL, label: "All ratings" }, ...LISTING_RATING_RANGES],
           },
-          {
-            id: "owner",
-            label: "Owner",
-            value: owner,
-            onChange: setOwner,
-            options: ownerFilterOptions(leads),
-          },
+          ...(showTeam
+            ? [
+                {
+                  id: "owner",
+                  label: "Owner",
+                  value: owner,
+                  onChange: setOwner,
+                  options: ownerFilterOptions(leads),
+                },
+              ]
+            : []),
         ]}
         actions={
           <Button variant="outline" onClick={() => exportLeads(rows)}>
@@ -2199,6 +2215,7 @@ function DealsTab({
   deals,
   query,
   me,
+  showTeam,
   canEdit,
   onEdit,
   onDelete,
@@ -2206,6 +2223,7 @@ function DealsTab({
   deals: CrmDeal[];
   query: QueryState;
   me: string;
+  showTeam: boolean;
   canEdit: (ownerId: string) => boolean;
   onEdit: (deal: CrmDeal) => void;
   onDelete: (deal: CrmDeal) => void;
@@ -2213,10 +2231,10 @@ function DealsTab({
   const queryClient = useQueryClient();
   const [view, setView] = useState<"board" | "list">("board");
   const [search, setSearch] = useState("");
-  const [owner, setOwner] = useState(ALL);
+  const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const needle = search.trim().toLowerCase();
   const rows = deals.filter((deal) => {
-    if (!matchesOwner(deal.ownerId, owner, me)) return false;
+    if (!matchesOwner(deal.ownerId, showTeam ? owner : MINE, me)) return false;
     if (!needle) return true;
     return [deal.name, deal.accountName, deal.contactName].some((value) =>
       value.toLowerCase().includes(needle),
@@ -2321,15 +2339,19 @@ function DealsTab({
         search={search}
         onSearchChange={setSearch}
         placeholder="Search deal, account or contact"
-        filters={[
-          {
-            id: "owner",
-            label: "Owner",
-            value: owner,
-            onChange: setOwner,
-            options: ownerFilterOptions(deals),
-          },
-        ]}
+        filters={
+          showTeam
+            ? [
+                {
+                  id: "owner",
+                  label: "Owner",
+                  value: owner,
+                  onChange: setOwner,
+                  options: ownerFilterOptions(deals),
+                },
+              ]
+            : []
+        }
         actions={
           <div className="flex rounded-lg border p-0.5" role="group" aria-label="Deal view">
             <Button
@@ -2736,6 +2758,7 @@ function ActivitiesTab({
   activities,
   query,
   me,
+  showTeam,
   canEdit,
   onEdit,
   onDelete,
@@ -2746,6 +2769,7 @@ function ActivitiesTab({
   activities: CrmActivity[];
   query: QueryState;
   me: string;
+  showTeam: boolean;
   canEdit: (ownerId: string) => boolean;
   onEdit: (activity: CrmActivity) => void;
   onDelete: (activity: CrmActivity) => void;
@@ -2756,20 +2780,20 @@ function ActivitiesTab({
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(ALL);
-  const [owner, setOwner] = useState(ALL);
+  const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const today = indiaDateKey();
   const needle = search.trim().toLowerCase();
   const rows = useMemo(
     () =>
       activities.filter((activity) => {
         if (status !== ALL && activity.status !== status) return false;
-        if (!matchesOwner(activity.ownerId, owner, me)) return false;
+        if (!matchesOwner(activity.ownerId, showTeam ? owner : MINE, me)) return false;
         if (!needle) return true;
         return [activity.subject, activity.relatedTo, activity.description].some((value) =>
           value.toLowerCase().includes(needle),
         );
       }),
-    [activities, status, owner, me, needle],
+    [activities, status, owner, me, needle, showTeam],
   );
 
   useEffect(() => {
@@ -2919,13 +2943,17 @@ function ActivitiesTab({
               ...ACTIVITY_STATUSES.map((value) => ({ value, label: crmLabel(value) })),
             ],
           },
-          {
-            id: "owner",
-            label: "Owner",
-            value: owner,
-            onChange: setOwner,
-            options: ownerFilterOptions(activities),
-          },
+          ...(showTeam
+            ? [
+                {
+                  id: "owner",
+                  label: "Owner",
+                  value: owner,
+                  onChange: setOwner,
+                  options: ownerFilterOptions(activities),
+                },
+              ]
+            : []),
         ]}
       />
       {rows.length === 0 && !query.isLoading && !query.isError ? (
