@@ -58,7 +58,12 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState("all");
   const [status, setStatus] = useState("all");
-  const { role, user, isLoading, isTeamLead, isSuperAdmin } = usePermissions();
+  const { role, user, isLoading, isTeamLead, isGeneralManager, isSuperAdmin } = usePermissions();
+  // A general_manager's default view stays org-wide (matching the rest of
+  // the app for that role), but they can still opt into exactly the "My
+  // Team" scope a team_lead already has -- a toggle, not the unconditional
+  // restriction team_lead has, so they never lose the full list.
+  const [gmScope, setGmScope] = useState<"all" | "my-team">("all");
   const canChangeStatus = role === "admin" || role === "hr";
   const [passwordEmployee, setPasswordEmployee] = useState<Employee | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -81,9 +86,10 @@ function EmployeesPage() {
     enabled: addOpen,
   });
   const employees = useQuery({
-    queryKey: ["employees", role, search, department, status],
+    queryKey: ["employees", role, search, department, status, gmScope],
     queryFn: async () => {
-      if (isTeamLead && user.employeeId) {
+      const wantsOwnTeam = isTeamLead || (isGeneralManager && gmScope === "my-team");
+      if (wantsOwnTeam && user.employeeId) {
         const team = await employeeService.teamOf(user.employeeId);
         return status === "all" ? team : team.filter((employee) => employee.status === status);
       }
@@ -142,7 +148,9 @@ function EmployeesPage() {
         employmentType: form.employmentType,
         joiningDate: form.joiningDate,
         bloodGroup: form.bloodGroup,
-        ...(isTeamLead && user.employeeId ? { managerId: user.employeeId } : {}),
+        ...((isTeamLead || isGeneralManager) && user.employeeId
+          ? { managerId: user.employeeId }
+          : {}),
       });
     },
     onSuccess: (created) => {
@@ -377,6 +385,20 @@ function EmployeesPage() {
             onSearchChange={setSearch}
             placeholder="Search by name, email or code…"
             filters={[
+              ...(isGeneralManager
+                ? [
+                    {
+                      id: "gm-scope",
+                      label: "Show",
+                      value: gmScope,
+                      onChange: (value: string) => setGmScope(value === "my-team" ? "my-team" : "all"),
+                      options: [
+                        { value: "all", label: "Everyone" },
+                        { value: "my-team", label: "My team" },
+                      ],
+                    },
+                  ]
+                : []),
               {
                 id: "department",
                 label: "Department",

@@ -73,7 +73,7 @@ function draftsForSet(
 }
 
 function KraPage() {
-  const { role, user, isEmployee, isDeptHead } = usePermissions();
+  const { role, user, isEmployee, isDeptHead, isGeneralManager } = usePermissions();
   const canAuthor = role === "admin" || role === "hr";
   const canAssign = canAuthor || isDeptHead;
   const [period, setPeriod] = useState(currentKraPeriod);
@@ -154,7 +154,7 @@ function KraPage() {
         <TabsContent value="scores" className="mt-4">
           <ScoresPanel
             period={period}
-            canCalculate={canAssign || role === "team_lead"}
+            canCalculate={canAssign || role === "team_lead" || isGeneralManager}
             canEnterManual={!isEmployee}
             {...(user.employeeId != null ? { selfEmployeeId: user.employeeId } : {})}
           />

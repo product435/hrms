@@ -79,6 +79,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { compactInr, indiaDateKey, indianDateTime, inr, shortDate } from "@/lib/format";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { crmService } from "@/services/crmService";
 import {
@@ -101,6 +118,7 @@ import {
 import {
   ACTIVITY_STATUSES,
   DEAL_STAGES,
+  LEAD_RATINGS,
   LEAD_STATUSES,
   LISTING_RATING_RANGES,
   OPEN_DEAL_STAGES,
@@ -113,6 +131,7 @@ import {
   type CrmContact,
   type CrmDeal,
   type CrmLead,
+  type CrmOwner,
   type DealStage,
   type ListingRatingRange,
 } from "@/types/crm";
@@ -311,6 +330,7 @@ function CrmPage() {
             leads={shared.leads}
             accounts={shared.accounts}
             contacts={shared.contacts}
+            owners={ownerList}
             query={leads}
             me={me}
             canManageAll={crm.canManageAll}
@@ -412,6 +432,7 @@ function CrmPage() {
           key={editing.record?.id ?? "new-lead"}
           open
           lead={editing.record}
+          activities={shared.activities}
           owners={ownerList}
           canAssign={crm.canManageAll}
           onClose={() => setEditing(null)}
@@ -434,6 +455,7 @@ function CrmPage() {
           key={editing.record?.id ?? "new-account"}
           open
           account={editing.record}
+          activities={shared.activities}
           owners={ownerList}
           canAssign={crm.canManageAll}
           onClose={() => setEditing(null)}
@@ -445,6 +467,7 @@ function CrmPage() {
           open
           contact={editing.record}
           accounts={shared.accounts}
+          activities={shared.activities}
           owners={ownerList}
           canAssign={crm.canManageAll}
           onClose={() => setEditing(null)}
@@ -460,6 +483,7 @@ function CrmPage() {
           deals={shared.deals}
           accounts={shared.accounts}
           contacts={shared.contacts}
+          existingActivities={shared.activities}
           owners={ownerList}
           canAssign={crm.canManageAll}
           onClose={() => setEditing(null)}
@@ -568,14 +592,18 @@ function OverviewTab({
 
   const metrics = useMemo(() => {
     const open = filteredDeals.filter((deal) => OPEN_DEAL_STAGES.includes(deal.stage));
-    const wonInRange = filteredDeals.filter(
+    // Won/lost are gated by WHEN THEY CLOSED, not when they were created --
+    // filteredDeals is created-in-range, so a deal created last month but
+    // won this month would otherwise never reach "Won this month" at all,
+    // contradicting that card's own "Closed in the selected range" hint.
+    // Scoped by owner the same way filteredDeals is, just not by createdAt.
+    const ownerScopedDeals = deals.filter((deal) => matchesFilterOwner(deal.ownerId));
+    const wonInRange = ownerScopedDeals.filter(
       (deal) => deal.stage === "won" && deal.closedAt && inRange(deal.closedAt),
     );
-    const lostInRange = filteredDeals.filter(
+    const lostInRange = ownerScopedDeals.filter(
       (deal) => deal.stage === "lost" && deal.closedAt && inRange(deal.closedAt),
     );
-    const won = filteredDeals.filter((deal) => deal.stage === "won").length;
-    const lost = filteredDeals.filter((deal) => deal.stage === "lost").length;
     const plannedActivities = activities.filter((activity) => activity.status === "planned");
     const overdue = plannedActivities.filter(
       (activity) => activity.dueAt && indiaDateKey(activity.dueAt) < today,
@@ -590,7 +618,15 @@ function OverviewTab({
       wonValue: wonInRange.reduce((sum, deal) => sum + deal.amount, 0),
       wonCount: wonInRange.length,
       lostCount: lostInRange.length,
-      winRate: won + lost === 0 ? null : (won / (won + lost)) * 100,
+      // Win rate is computed from the SAME closed-in-range population as
+      // wonCount/lostCount shown right beside it on the same stat card --
+      // previously this counted deals by when they were CREATED instead
+      // of when they CLOSED, so the percentage could disagree with the
+      // deal count displayed next to it.
+      winRate:
+        wonInRange.length + lostInRange.length === 0
+          ? null
+          : (wonInRange.length / (wonInRange.length + lostInRange.length)) * 100,
       openLeads: filteredLeads.filter((lead) => !["converted", "unqualified"].includes(lead.status))
         .length,
       hotLeads: filteredLeads.filter((lead) => lead.rating === "hot" && lead.status !== "converted")
@@ -601,7 +637,7 @@ function OverviewTab({
       demosScheduled,
       demosCompleted,
     };
-  }, [activities, filteredDeals, filteredLeads, inRange, today]);
+  }, [activities, deals, filteredDeals, filteredLeads, inRange, matchesFilterOwner, today]);
 
   const owners = useMemo(() => {
     const seen = new Map<string, string>();
@@ -1880,6 +1916,7 @@ function LeadsTab({
   leads,
   accounts,
   contacts,
+  owners,
   query,
   me,
   canManageAll,
@@ -1894,6 +1931,7 @@ function LeadsTab({
   leads: CrmLead[];
   accounts: CrmAccount[];
   contacts: CrmContact[];
+  owners: CrmOwner[];
   query: QueryState;
   me: string;
   canManageAll: boolean;
@@ -1905,9 +1943,11 @@ function LeadsTab({
   onLog: (lead: CrmLead) => void;
   onOpenTab: (tab: string) => void;
 }) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(ALL);
   const [rating, setRating] = useState(ALL);
+  const [temperature, setTemperature] = useState(ALL);
   // A rep with no team/org-wide access never gets the Owner filter shown
   // (see the FilterBar below) and the row filter below must agree with
   // that even though the owner dropdown is hidden -- otherwise hiding the
@@ -1916,6 +1956,12 @@ function LeadsTab({
   const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const [whatsappLead, setWhatsappLead] = useState<CrmLead | null>(null);
   const [callLead, setCallLead] = useState<CrmLead | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAction, setBulkAction] = useState<
+    "owner" | "rating" | "status" | "follow-up" | null
+  >(null);
+  const [bulkValue, setBulkValue] = useState("");
+  const [bulkPending, setBulkPending] = useState(false);
   const needle = search.trim().toLowerCase();
   const rows = leads.filter((lead) => {
     if (status === "open" && ["converted", "unqualified"].includes(lead.status)) return false;
@@ -1925,6 +1971,7 @@ function LeadsTab({
       !matchesListingRatingRange(lead.listingRating, rating as ListingRatingRange)
     )
       return false;
+    if (temperature !== ALL && lead.rating !== temperature) return false;
     if (!matchesOwner(lead.ownerId, showTeam ? owner : MINE, me)) return false;
     if (!needle) return true;
     return [lead.firstName, lead.lastName, lead.company, lead.email, lead.phone].some((value) =>
@@ -1932,10 +1979,118 @@ function LeadsTab({
     );
   });
 
+  // Overdue follow-up: scheduled in the past and still not converted/unqualified.
+  const now = Date.now();
+  const overdueCount = leads.filter(
+    (lead) =>
+      lead.nextFollowUpAt != null &&
+      new Date(lead.nextFollowUpAt).getTime() < now &&
+      lead.status !== "converted" &&
+      lead.status !== "unqualified",
+  ).length;
+  const temperatureCounts = {
+    hot: leads.filter((lead) => lead.rating === "hot").length,
+    warm: leads.filter((lead) => lead.rating === "warm").length,
+    cold: leads.filter((lead) => lead.rating === "cold").length,
+  };
+
+  // Only rows the caller is actually allowed to edit can be bulk-selected --
+  // selecting a row never implies permission beyond what the row action
+  // buttons already allow; the service layer's per-row RLS check is still
+  // the real enforcement either way.
+  const selectableRows = rows.filter((row) => canEdit(row.ownerId));
+  const selectedRows = selectableRows.filter((row) => selectedIds.has(row.id));
+  const allSelectableSelected =
+    selectableRows.length > 0 && selectedRows.length === selectableRows.length;
+
+  function toggleRow(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds(allSelectableSelected ? new Set() : new Set(selectableRows.map((r) => r.id)));
+  }
+
+  function closeBulk() {
+    setBulkAction(null);
+    setBulkValue("");
+  }
+
+  async function runBulkAction() {
+    if (!bulkAction || selectedRows.length === 0) return;
+    const ids = selectedRows.map((r) => r.id);
+    setBulkPending(true);
+    try {
+      let result: { succeeded: string[]; failed: Array<{ id: string; error: string }> };
+      if (bulkAction === "owner") {
+        if (!bulkValue) {
+          toast.error("Choose an owner.");
+          return;
+        }
+        result = await crmService.bulkSetLeadOwner(ids, bulkValue);
+      } else if (bulkAction === "rating") {
+        result = await crmService.bulkSetLeadRating(ids, bulkValue as CrmLead["rating"]);
+      } else if (bulkAction === "status") {
+        result = await crmService.bulkSetLeadStatus(ids, bulkValue as CrmLead["status"]);
+      } else {
+        if (!bulkValue) {
+          toast.error("Choose a follow-up date.");
+          return;
+        }
+        result = await crmService.bulkSetLeadFollowUp(ids, new Date(bulkValue).toISOString());
+      }
+      if (result.succeeded.length > 0) {
+        toast.success(
+          `Updated ${result.succeeded.length} lead${result.succeeded.length === 1 ? "" : "s"}` +
+            (result.failed.length > 0 ? `, ${result.failed.length} failed` : ""),
+        );
+      }
+      if (result.failed.length > 0 && result.succeeded.length === 0) {
+        toast.error(result.failed[0]?.error ?? "Could not update the selected leads.");
+      }
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        result.succeeded.forEach((id) => next.delete(id));
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: CRM_QUERY_KEY });
+      closeBulk();
+    } catch (error) {
+      toast.error(errorText(error));
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const contactById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
 
   const columns: Column<CrmLead>[] = [
+    {
+      key: "select",
+      header: (
+        <Checkbox
+          checked={allSelectableSelected}
+          onCheckedChange={toggleAll}
+          aria-label="Select all"
+          disabled={selectableRows.length === 0}
+        />
+      ),
+      cell: (row) =>
+        canEdit(row.ownerId) ? (
+          <Checkbox
+            checked={selectedIds.has(row.id)}
+            onCheckedChange={() => toggleRow(row.id)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${personName(row.firstName, row.lastName)}`}
+          />
+        ) : null,
+    },
     {
       key: "name",
       header: "Lead",
@@ -2135,6 +2290,40 @@ function LeadsTab({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            { value: ALL, label: `All (${leads.length})` },
+            { value: "hot", label: `🔥 Hot (${temperatureCounts.hot})` },
+            { value: "warm", label: `🌤 Warm (${temperatureCounts.warm})` },
+            { value: "cold", label: `❄️ Cold (${temperatureCounts.cold})` },
+          ] as const
+        ).map((chip) => (
+          <button
+            key={chip.value}
+            type="button"
+            onClick={() => setTemperature(chip.value)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              temperature === chip.value
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted/40",
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+        {overdueCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setStatus(ALL)}
+            className="rounded-full border border-destructive/30 bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive"
+            title="Leads with a follow-up date in the past"
+          >
+            {overdueCount} overdue follow-up{overdueCount === 1 ? "" : "s"}
+          </button>
+        ) : null}
+      </div>
       <FilterBar
         search={search}
         onSearchChange={setSearch}
@@ -2153,7 +2342,7 @@ function LeadsTab({
           },
           {
             id: "rating",
-            label: "Rating",
+            label: "Listing rating",
             value: rating,
             onChange: setRating,
             options: [{ value: ALL, label: "All ratings" }, ...LISTING_RATING_RANGES],
@@ -2176,6 +2365,30 @@ function LeadsTab({
           </Button>
         }
       />
+      {selectedRows.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+          <span className="text-sm font-medium">
+            {selectedRows.length} selected
+          </span>
+          <Button size="sm" variant="outline" onClick={() => setBulkAction("status")}>
+            Set status
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setBulkAction("rating")}>
+            Set temperature
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setBulkAction("follow-up")}>
+            Schedule follow-up
+          </Button>
+          {canManageAll ? (
+            <Button size="sm" variant="outline" onClick={() => setBulkAction("owner")}>
+              Reassign owner
+            </Button>
+          ) : null}
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+            Clear selection
+          </Button>
+        </div>
+      ) : null}
       <DataTable
         columns={columns}
         data={rows}
@@ -2190,6 +2403,78 @@ function LeadsTab({
         emptyTitle="No leads here"
         emptyDescription="New enquiries, referrals and event contacts land here first."
       />
+      <Dialog open={bulkAction != null} onOpenChange={(next) => !next && closeBulk()}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {bulkAction === "owner"
+                ? "Reassign owner"
+                : bulkAction === "rating"
+                  ? "Set temperature"
+                  : bulkAction === "status"
+                    ? "Set status"
+                    : "Schedule follow-up"}
+            </DialogTitle>
+            <DialogDescription>
+              Applies to {selectedRows.length} selected lead{selectedRows.length === 1 ? "" : "s"}.
+            </DialogDescription>
+          </DialogHeader>
+          {bulkAction === "owner" ? (
+            <Select value={bulkValue} onValueChange={setBulkValue}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose an owner" />
+              </SelectTrigger>
+              <SelectContent>
+                {owners.map((o) => (
+                  <SelectItem key={o.id} value={o.id}>
+                    {o.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : bulkAction === "rating" ? (
+            <Select value={bulkValue} onValueChange={setBulkValue}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a temperature" />
+              </SelectTrigger>
+              <SelectContent>
+                {LEAD_RATINGS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {crmLabel(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : bulkAction === "status" ? (
+            <Select value={bulkValue} onValueChange={setBulkValue}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a status" />
+              </SelectTrigger>
+              <SelectContent>
+                {LEAD_STATUSES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {crmLabel(value)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              type="datetime-local"
+              value={bulkValue}
+              onChange={(e) => setBulkValue(e.target.value)}
+            />
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeBulk} disabled={bulkPending}>
+              Cancel
+            </Button>
+            <Button onClick={() => void runBulkAction()} disabled={bulkPending || !bulkValue}>
+              {bulkPending ? "Applying…" : "Apply"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <WhatsAppDialog
         open={whatsappLead != null}
         leadId={whatsappLead?.id ?? null}
@@ -2780,20 +3065,41 @@ function ActivitiesTab({
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(ALL);
+  const [due, setDue] = useState(ALL);
   const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const today = indiaDateKey();
   const needle = search.trim().toLowerCase();
+
+  function dueBucket(activity: CrmActivity): "today" | "overdue" | "upcoming" | null {
+    if (activity.status !== "planned" || activity.dueAt == null) return null;
+    const dueDay = indiaDateKey(activity.dueAt);
+    if (dueDay < today) return "overdue";
+    if (dueDay === today) return "today";
+    return "upcoming";
+  }
+
+  const dueCounts = useMemo(() => {
+    const counts = { today: 0, overdue: 0, upcoming: 0 };
+    for (const activity of activities) {
+      if (!matchesOwner(activity.ownerId, showTeam ? ALL : MINE, me)) continue;
+      const bucket = dueBucket(activity);
+      if (bucket) counts[bucket] += 1;
+    }
+    return counts;
+  }, [activities, me, showTeam]);
+
   const rows = useMemo(
     () =>
       activities.filter((activity) => {
         if (status !== ALL && activity.status !== status) return false;
+        if (due !== ALL && dueBucket(activity) !== due) return false;
         if (!matchesOwner(activity.ownerId, showTeam ? owner : MINE, me)) return false;
         if (!needle) return true;
         return [activity.subject, activity.relatedTo, activity.description].some((value) =>
           value.toLowerCase().includes(needle),
         );
       }),
-    [activities, status, owner, me, needle, showTeam],
+    [activities, status, due, owner, me, needle, showTeam],
   );
 
   useEffect(() => {
@@ -2928,6 +3234,32 @@ function ActivitiesTab({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            { value: ALL, label: "All follow-ups" },
+            { value: "today", label: `Today (${dueCounts.today})` },
+            { value: "overdue", label: `Overdue (${dueCounts.overdue})` },
+            { value: "upcoming", label: `Upcoming (${dueCounts.upcoming})` },
+          ] as const
+        ).map((chip) => (
+          <button
+            key={chip.value}
+            type="button"
+            onClick={() => setDue(chip.value)}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              due === chip.value
+                ? chip.value === "overdue"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted/40",
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
       <FilterBar
         search={search}
         onSearchChange={setSearch}

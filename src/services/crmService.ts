@@ -304,6 +304,32 @@ async function save(table: string, id: string | null, payload: LooseRow) {
 }
 
 /**
+ * Runs one save() per lead (not a single multi-row update), so the
+ * existing per-row RLS check in checkSaveResult still applies to each lead
+ * individually -- a lead outside the caller's own/managed scope fails for
+ * that row specifically instead of silently succeeding or blocking the
+ * whole batch. Settled in parallel; failures are reported back by lead id
+ * so the caller can tell the user exactly which rows did not update and why.
+ */
+async function bulkSaveLeads(
+  ids: string[],
+  payload: LooseRow,
+): Promise<{ succeeded: string[]; failed: Array<{ id: string; error: string }> }> {
+  const results = await Promise.allSettled(ids.map((id) => save("crm_leads", id, payload)));
+  const failed: Array<{ id: string; error: string }> = [];
+  const succeeded: string[] = [];
+  ids.forEach((id, i) => {
+    const result = results[i];
+    if (result?.status === "fulfilled") {
+      succeeded.push(id);
+    } else if (result?.status === "rejected") {
+      failed.push({ id, error: result.reason instanceof Error ? result.reason.message : "Failed." });
+    }
+  });
+  return { succeeded, failed };
+}
+
+/**
  * Like save(), but for columns that may not exist yet on a database where a
  * newer migration has not been applied. If the full payload is rejected for
  * missing column(s), retries once without `optionalKeys` so the rest of the
@@ -487,6 +513,18 @@ export const crmService = {
   async setLeadStatus(id: string, status: LeadStatus) {
     await save("crm_leads", id, { status });
   },
+  async bulkSetLeadOwner(ids: string[], ownerId: string) {
+    return bulkSaveLeads(ids, { owner_id: ownerId });
+  },
+  async bulkSetLeadRating(ids: string[], rating: LeadRating) {
+    return bulkSaveLeads(ids, { rating });
+  },
+  async bulkSetLeadStatus(ids: string[], status: LeadStatus) {
+    return bulkSaveLeads(ids, { status });
+  },
+  async bulkSetLeadFollowUp(ids: string[], nextFollowUpAt: string) {
+    return bulkSaveLeads(ids, { next_follow_up_at: nextFollowUpAt });
+  },
   /**
    * Demo tracking only exists once migration 20261112130740 is applied.
    * Unlike saveLead(), there is nothing else useful to save here if those
@@ -513,14 +551,21 @@ export const crmService = {
   },
   async convertLead(
     id: string,
-    options: { createDeal: boolean; dealName?: string; dealAmount?: number | null },
+    options: {
+      createDeal: boolean;
+      dealName?: string;
+      dealAmount?: number | null;
+      existingAccountId?: string | null;
+      existingContactId?: string | null;
+    },
   ): Promise<{ accountId: string; contactId: string; dealId: string | null }> {
     const { data, error } = await db().rpc("convert_crm_lead", {
       p_lead_id: id,
       p_create_deal: options.createDeal,
       p_deal_name: blank(options.dealName),
       p_deal_amount: options.dealAmount ?? null,
-      p_existing_account_id: null,
+      p_existing_account_id: options.existingAccountId ?? null,
+      p_existing_contact_id: options.existingContactId ?? null,
     });
     fail(error);
     const row = (data ?? {}) as LooseRow;
@@ -529,6 +574,37 @@ export const crmService = {
       contactId: text(row["contact_id"]),
       dealId: textOrNull(row["deal_id"]),
     };
+  },
+  /**
+   * Candidate accounts a lead might already belong to, matched on
+   * normalized company name (case/whitespace-insensitive) within the same
+   * organisation -- a suggestion only, never applied automatically. The
+   * caller (ConvertLeadDialog) shows these to the user, who picks "use
+   * existing" or "create new". crm_accounts_select is already org-wide
+   * for has_crm_access(), so this is a plain filtered read, no new RPC.
+   */
+  async findMatchingAccounts(companyName: string): Promise<CrmAccount[]> {
+    const needle = companyName.trim();
+    if (!needle || !isSupabaseConfigured || !supabase) return [];
+    return (
+      await rows(db().from("crm_accounts").select(`*, ${OWNER("crm_accounts")}`).ilike("name", needle))
+    ).map(mapAccount);
+  },
+  /** Same idea as findMatchingAccounts(), matched on email or phone. */
+  async findMatchingContacts(email: string, phone: string): Promise<CrmContact[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const filters: string[] = [];
+    if (email.trim()) filters.push(`email.ilike.${email.trim()}`);
+    if (phone.trim()) filters.push(`phone.ilike.${phone.trim()}`);
+    if (filters.length === 0) return [];
+    return (
+      await rows(
+        db()
+          .from("crm_contacts")
+          .select(`*, ${OWNER("crm_contacts")}`)
+          .or(filters.join(",")),
+      )
+    ).map(mapContact);
   },
   /**
    * Calls delete_crm_lead (see final_fix_4.sql), not a plain delete: removing
@@ -544,13 +620,46 @@ export const crmService = {
     fail(error);
   },
   /**
-   * Replaces the previous import (if any) with this one, inside a single
-   * database transaction (see import_crm_leads in
-   * supabase/migrations/20261117110000_crm_import_leads_rpc.sql): nothing
-   * is removed or inserted unless the whole call succeeds. Column mapping
-   * and duplicate detection against every remaining lead happen entirely
-   * inside that function -- this is just the thin client call.
+   * One universal import workflow that REPLACES the caller's own previous
+   * import batch (see import_crm_leads in
+   * supabase/migrations/20261126140000_crm_import_replace_previous_batch.sql):
+   * a row matching a lead that survives this import (anyone else's lead, a
+   * hand-added lead, or a different one of the caller's own past batches)
+   * is a duplicate and is skipped, never enriched; a row with no match is
+   * inserted; the caller's own previous batch (still owned by the caller)
+   * is then archived and removed -- hand-added leads are never touched,
+   * by construction, since they have no import_batch_id to match. Nothing
+   * is removed unless at least one new row was actually imported, and the
+   * whole call is one transaction: a failed import leaves the previous
+   * batch intact.
    */
+  async previewImportLeads(
+    leadRows: Array<{ firstName: string; company?: string; email?: string; phone?: string }>,
+  ): Promise<{
+    newCount: number;
+    duplicateCount: number;
+    ambiguousCount: number;
+    invalidCount: number;
+    replaceCount: number;
+  }> {
+    const { data, error } = await db().rpc("preview_import_crm_leads", {
+      p_rows: leadRows.map((row) => ({
+        first_name: row.firstName,
+        company: row.company ?? null,
+        email: row.email ?? null,
+        phone: row.phone ?? null,
+      })),
+    });
+    fail(error);
+    const result = (data ?? {}) as LooseRow;
+    return {
+      newCount: num(result["new_count"]) ?? 0,
+      duplicateCount: num(result["duplicate_count"]) ?? 0,
+      ambiguousCount: num(result["ambiguous_count"]) ?? 0,
+      invalidCount: num(result["invalid_count"]) ?? 0,
+      replaceCount: num(result["replace_count"]) ?? 0,
+    };
+  },
   async importLeads(
     fileName: string,
     leadRows: Array<{
@@ -562,12 +671,18 @@ export const crmService = {
       jobTitle?: string;
       estimatedValue?: number | null;
       listingRating?: number | null;
+      rating?: "hot" | "warm" | "cold" | null;
+      notes?: string;
     }>,
   ): Promise<{
-    insertedCount: number;
+    newCount: number;
     duplicateCount: number;
-    deletedCount: number;
+    ambiguousCount: number;
+    invalidCount: number;
+    failedCount: number;
+    replacedCount: number;
     restoredCount: number;
+    failedRows: Array<{ row: number; firstName: string; reason: string; error?: string }>;
   }> {
     const { data, error } = await db().rpc("import_crm_leads", {
       p_file_name: fileName,
@@ -580,15 +695,27 @@ export const crmService = {
         job_title: row.jobTitle ?? null,
         estimated_value: row.estimatedValue ?? null,
         listing_rating: row.listingRating ?? null,
+        rating: row.rating ?? null,
+        notes: row.notes ?? null,
       })),
     });
     fail(error);
     const result = (data ?? {}) as LooseRow;
+    const errors = Array.isArray(result["errors"]) ? (result["errors"] as LooseRow[]) : [];
     return {
-      insertedCount: num(result["inserted_count"]) ?? 0,
+      newCount: num(result["new_count"]) ?? 0,
       duplicateCount: num(result["duplicate_count"]) ?? 0,
-      deletedCount: num(result["deleted_count"]) ?? 0,
+      ambiguousCount: num(result["ambiguous_count"]) ?? 0,
+      invalidCount: num(result["invalid_count"]) ?? 0,
+      failedCount: num(result["failed_count"]) ?? 0,
+      replacedCount: num(result["replaced_count"]) ?? 0,
       restoredCount: num(result["restored_count"]) ?? 0,
+      failedRows: errors.map((e) => ({
+        row: num(e["row"]) ?? 0,
+        firstName: String(e["first_name"] ?? ""),
+        reason: String(e["reason"] ?? ""),
+        ...(e["error"] ? { error: String(e["error"]) } : {}),
+      })),
     };
   },
 

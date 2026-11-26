@@ -25,7 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { attendanceService } from "@/services/attendanceService";
+import { attendanceService, EarlyCheckInError } from "@/services/attendanceService";
 import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { indiaDateKey, indiaLocalDateTimeToUtcIso, indianTime, shortDate } from "@/lib/format";
@@ -200,8 +200,13 @@ function AttendancePage() {
       });
       refreshAttendance();
     },
-    onError: (error) =>
-      toast.error("Could not record your punch", { description: messageOf(error) }),
+    onError: (error) => {
+      if (error instanceof EarlyCheckInError) {
+        toast("You are checking in early, before 10:00 AM");
+        return;
+      }
+      toast.error("Could not record your punch", { description: messageOf(error) });
+    },
   });
 
   const wfh = useMutation({

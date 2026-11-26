@@ -186,18 +186,18 @@ function reportStatusModifiers(byDate: Map<string, DwrStatus>) {
 
 function ReportStatusLegend() {
   return (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-      <span className="flex items-center gap-1">
-        <span className="size-1.5 rounded-full bg-success" /> Submitted
+    <div className="flex flex-wrap items-center gap-3 text-xs text-foreground">
+      <span className="flex items-center gap-1.5">
+        <span className="size-2 rounded-full bg-success" /> Submitted
       </span>
-      <span className="flex items-center gap-1">
-        <span className="size-1.5 rounded-full bg-warning" /> Late
+      <span className="flex items-center gap-1.5">
+        <span className="size-2 rounded-full bg-warning" /> Late
       </span>
-      <span className="flex items-center gap-1">
-        <span className="size-1.5 rounded-full bg-destructive" /> Missed
+      <span className="flex items-center gap-1.5">
+        <span className="size-2 rounded-full bg-destructive" /> Missed
       </span>
-      <span className="flex items-center gap-1">
-        <span className="size-1.5 rounded-full bg-muted-foreground" /> Draft
+      <span className="flex items-center gap-1.5">
+        <span className="size-2 rounded-full bg-muted-foreground" /> Draft
       </span>
     </div>
   );
@@ -258,7 +258,7 @@ function ReportDatePicker({
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      <PopoverContent className="w-auto rounded-xl p-0" align="start">
         <Calendar
           mode="single"
           captionLayout="dropdown"
@@ -286,19 +286,28 @@ function ReportDatePicker({
             late: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
             missed: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
           }}
+          classNames={{
+            day: "p-0.5",
+            // Only today is enabled here, so "disabled" below means every
+            // other, non-today date -- keep it clearly readable (not
+            // faded/low-contrast) rather than the base calendar's default
+            // opacity-50, while today and the selected day stay visibly
+            // highlighted via the base component's own today/selected styles.
+            disabled: "text-foreground/70 opacity-100",
+          }}
         />
-        <div className="flex items-center gap-3 border-t px-3 py-2 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-success" /> Submitted
+        <div className="flex items-center gap-3 rounded-b-xl border-t bg-muted/40 px-3 py-2.5 text-xs text-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-success" /> Submitted
           </span>
-          <span className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-warning" /> Late
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-warning" /> Late
           </span>
-          <span className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-destructive" /> Missed
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-destructive" /> Missed
           </span>
-          <span className="flex items-center gap-1">
-            <span className="size-1.5 rounded-full bg-muted-foreground" /> Draft
+          <span className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-muted-foreground" /> Draft
           </span>
         </div>
       </PopoverContent>
@@ -344,7 +353,7 @@ function RecentReportsCalendar({
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
+      <PopoverContent className="w-auto rounded-xl p-0" align="start">
         <Calendar
           mode="single"
           captionLayout="dropdown"
@@ -358,8 +367,14 @@ function RecentReportsCalendar({
           }}
           modifiers={reportStatusModifiers(byDate)}
           modifiersClassNames={DWR_STATUS_MODIFIER_CLASSNAMES}
+          classNames={{
+            day: "p-0.5",
+            // Only future dates are disabled here -- every past date stays
+            // clickable (opens read-only) and must read clearly, not faded.
+            disabled: "text-foreground/40",
+          }}
         />
-        <div className="border-t px-3 py-2">
+        <div className="rounded-b-xl border-t bg-muted/40 px-3 py-2.5">
           <ReportStatusLegend />
         </div>
       </PopoverContent>
@@ -396,22 +411,22 @@ function nowIstMinutes(): number {
 }
 
 /**
- * Submitted up to 7:00 PM IST, Late from 7:00 PM to 11:59 PM, Missed once
+ * Submitted up to 8:00 PM IST, Late from 8:01 PM to 11:59 PM, Missed once
  * the report date itself is over -- a fixed, time-of-day rule, no longer
  * tied to each employee's own shift end (the old "window opens 30
  * minutes before your shift ends" model this replaces).
  */
 function submissionTimingCopy(): string {
   const minutes = nowIstMinutes();
-  if (minutes < 19 * 60) return "Submit now and it will show as Submitted (before 7:00 PM IST).";
-  return "It's past 7:00 PM IST -- submitting now will show as Late, not Missed.";
+  if (minutes <= 20 * 60) return "Submit now and it will show as Submitted (by 8:00 PM IST).";
+  return "It's past 8:00 PM IST -- submitting now will show as Late, not Missed.";
 }
 
 const REPORT_STATUS_HELP = (
   <div className="space-y-1">
     <p>Draft: saved, not submitted yet.</p>
-    <p>Submitted: sent by 7:00 PM IST on the report date.</p>
-    <p>Late: sent after 7:00 PM and by 11:59 PM IST on the report date.</p>
+    <p>Submitted: sent by 8:00 PM IST on the report date.</p>
+    <p>Late: sent after 8:00 PM and by 11:59 PM IST on the report date.</p>
     <p>Missed: nothing was submitted by the end of the report date, including an unsubmitted draft.</p>
   </div>
 );

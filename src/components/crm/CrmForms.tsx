@@ -1,4 +1,12 @@
-import { useRef, useState, type ChangeEvent, type DragEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import Papa from "papaparse";
@@ -250,15 +258,64 @@ function leadDraft(lead: CrmLead | null): LeadInput {
   };
 }
 
+/**
+ * Read-only "what happened with this record" list, filtered client-side
+ * from whatever activities are already loaded -- no new query. Shown
+ * inside the Lead/Account/Contact edit dialogs so a user does not have to
+ * leave the dialog and search the Activities tab by name to see history.
+ * Only renders once the record exists (a brand-new, unsaved record has no
+ * activities yet).
+ */
+function RelatedActivityTimeline({
+  activities,
+  matches,
+}: {
+  activities: CrmActivity[];
+  matches: (activity: CrmActivity) => boolean;
+}) {
+  const related = activities
+    .filter(matches)
+    .sort((a, b) => (b.dueAt ?? b.completedAt ?? "").localeCompare(a.dueAt ?? a.completedAt ?? ""));
+  if (related.length === 0) return null;
+  return (
+    <div className="sm:col-span-2">
+      <Label>Recent activity</Label>
+      <ul className="mt-1.5 max-h-48 space-y-2 overflow-y-auto rounded-md border p-2">
+        {related.slice(0, 20).map((activity) => (
+          <li key={activity.id} className="text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium">{activity.subject}</span>
+              <span className="shrink-0 text-muted-foreground">
+                {crmLabel(activity.type)} · {crmLabel(activity.status)}
+              </span>
+            </div>
+            <p className="text-muted-foreground">
+              {activity.dueAt
+                ? indianDateTime(activity.dueAt)
+                : activity.completedAt
+                  ? indianDateTime(activity.completedAt)
+                  : "No date"}
+              {" · "}
+              {activity.ownerName}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function LeadDialog({
   open,
   lead,
+  activities,
   owners,
   canAssign,
   onClose,
 }: {
   open: boolean;
   lead: CrmLead | null;
+  activities?: CrmActivity[];
   owners: CrmOwner[];
   canAssign: boolean;
   onClose: () => void;
@@ -490,6 +547,9 @@ export function LeadDialog({
           onChange={(e) => set({ notes: e.target.value })}
         />
       </Field>
+      {lead && activities ? (
+        <RelatedActivityTimeline activities={activities} matches={(a) => a.leadId === lead.id} />
+      ) : null}
     </FormDialog>
   );
 }
@@ -506,12 +566,40 @@ export function ConvertLeadDialog({
     lead ? `${lead.company || `${lead.firstName} ${lead.lastName}`.trim()} deal` : "",
   );
   const [amount, setAmount] = useState(lead?.estimatedValue?.toString() ?? "");
+  // "new" means create one; any other value is an existing record's id.
+  const [accountChoice, setAccountChoice] = useState<string>("new");
+  const [contactChoice, setContactChoice] = useState<string>("new");
+
+  const matchingAccounts = useQuery({
+    queryKey: ["crm-matching-accounts", lead?.company],
+    queryFn: () => crmService.findMatchingAccounts(lead?.company ?? ""),
+    enabled: lead != null && Boolean(lead.company?.trim()),
+  });
+  const matchingContacts = useQuery({
+    queryKey: ["crm-matching-contacts", lead?.email, lead?.phone],
+    queryFn: () => crmService.findMatchingContacts(lead?.email ?? "", lead?.phone ?? ""),
+    enabled: lead != null && Boolean(lead.email?.trim() || lead.phone?.trim()),
+  });
+
+  // Reset the choice back to "new" whenever a different lead opens, or once
+  // a match comes back -- defaults to the first match found so the common
+  // case (one obvious match) needs no extra click, while still letting the
+  // user switch to "create new" explicitly.
+  useEffect(() => {
+    setAccountChoice(matchingAccounts.data?.[0]?.id ?? "new");
+  }, [lead?.id, matchingAccounts.data]);
+  useEffect(() => {
+    setContactChoice(matchingContacts.data?.[0]?.id ?? "new");
+  }, [lead?.id, matchingContacts.data]);
+
   const convert = useCrmSave(
     () =>
       crmService.convertLead(lead?.id ?? "", {
         createDeal,
         dealName,
         dealAmount: numberOrNull(amount),
+        existingAccountId: accountChoice === "new" ? null : accountChoice,
+        existingContactId: contactChoice === "new" ? null : contactChoice,
       }),
     (result) =>
       result.dealId != null
@@ -535,6 +623,46 @@ export function ConvertLeadDialog({
         convert.mutate(undefined);
       }}
     >
+      {matchingAccounts.data && matchingAccounts.data.length > 0 ? (
+        <Field label="Account" htmlFor="convert-account" className="sm:col-span-2">
+          <select
+            id="convert-account"
+            className={selectClass}
+            value={accountChoice}
+            onChange={(e) => setAccountChoice(e.target.value)}
+          >
+            <option value="new">Create a new account</option>
+            {matchingAccounts.data.map((account) => (
+              <option key={account.id} value={account.id}>
+                Use existing: {account.name}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Found an existing account with a matching name. Using it avoids a duplicate.
+          </p>
+        </Field>
+      ) : null}
+      {matchingContacts.data && matchingContacts.data.length > 0 ? (
+        <Field label="Contact" htmlFor="convert-contact" className="sm:col-span-2">
+          <select
+            id="convert-contact"
+            className={selectClass}
+            value={contactChoice}
+            onChange={(e) => setContactChoice(e.target.value)}
+          >
+            <option value="new">Create a new contact</option>
+            {matchingContacts.data.map((contact) => (
+              <option key={contact.id} value={contact.id}>
+                Use existing: {`${contact.firstName} ${contact.lastName}`.trim()}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Found an existing contact with a matching email or phone. Using it avoids a duplicate.
+          </p>
+        </Field>
+      ) : null}
       <div className="flex items-center gap-2 sm:col-span-2">
         <Checkbox
           id="convert-deal"
@@ -784,12 +912,14 @@ function accountDraft(account: CrmAccount | null): AccountInput {
 export function AccountDialog({
   open,
   account,
+  activities,
   owners,
   canAssign,
   onClose,
 }: {
   open: boolean;
   account: CrmAccount | null;
+  activities?: CrmActivity[];
   owners: CrmOwner[];
   canAssign: boolean;
   onClose: () => void;
@@ -797,6 +927,11 @@ export function AccountDialog({
   const [draft, setDraft] = useState<AccountInput>(() => accountDraft(account));
   const [revenue, setRevenue] = useState(account?.annualRevenue?.toString() ?? "");
   const [size, setSize] = useState(account?.employeeCount?.toString() ?? "");
+  // Tracks the exact name already checked and confirmed (or cleared) for
+  // duplicates, so editing the name after a warning re-triggers the check,
+  // but clicking Save a second time for the SAME name goes straight through.
+  const [duplicateCheckedFor, setDuplicateCheckedFor] = useState<string | null>(null);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const save = useCrmSave(
     (input: AccountInput) => crmService.saveAccount(account?.id ?? null, input),
     account ? "Account updated" : "Account added",
@@ -809,9 +944,9 @@ export function AccountDialog({
       onOpenChange={(next) => !next && onClose()}
       title={account ? "Edit account" : "New account"}
       description="A customer or prospect company."
-      pending={save.isPending}
+      pending={save.isPending || checkingDuplicate}
       submitLabel={account ? "Save account" : "Add account"}
-      onSubmit={() => {
+      onSubmit={async () => {
         if (!draft.name.trim()) {
           toast.error("Account name is required.");
           return;
@@ -826,6 +961,19 @@ export function AccountDialog({
           return;
         }
         if (!canAssign || !draft.ownerId) delete input.ownerId;
+
+        if (!account && duplicateCheckedFor !== draft.name) {
+          setCheckingDuplicate(true);
+          const matches = await crmService.findMatchingAccounts(draft.name);
+          setCheckingDuplicate(false);
+          setDuplicateCheckedFor(draft.name);
+          if (matches.length > 0) {
+            toast.warning(
+              `An account named "${matches[0]?.name}" already exists. Click "${account ? "Save account" : "Add account"}" again to create a separate one anyway.`,
+            );
+            return;
+          }
+        }
         save.mutate(input);
       }}
     >
@@ -928,6 +1076,12 @@ export function AccountDialog({
           onChange={(e) => set({ notes: e.target.value })}
         />
       </Field>
+      {account && activities ? (
+        <RelatedActivityTimeline
+          activities={activities}
+          matches={(a) => a.accountId === account.id}
+        />
+      ) : null}
     </FormDialog>
   );
 }
@@ -951,6 +1105,7 @@ export function ContactDialog({
   open,
   contact,
   accounts,
+  activities,
   owners,
   canAssign,
   onClose,
@@ -958,11 +1113,17 @@ export function ContactDialog({
   open: boolean;
   contact: CrmContact | null;
   accounts: CrmAccount[];
+  activities?: CrmActivity[];
   owners: CrmOwner[];
   canAssign: boolean;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<ContactInput>(() => contactDraft(contact));
+  // Tracks the exact email+phone pair already checked for duplicates, so
+  // editing either after a warning re-triggers the check, but clicking Save
+  // a second time for the SAME values goes straight through.
+  const [duplicateCheckedFor, setDuplicateCheckedFor] = useState<string | null>(null);
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const save = useCrmSave(
     (input: ContactInput) => crmService.saveContact(contact?.id ?? null, input),
     contact ? "Contact updated" : "Contact added",
@@ -975,15 +1136,31 @@ export function ContactDialog({
       onOpenChange={(next) => !next && onClose()}
       title={contact ? "Edit contact" : "New contact"}
       description="A person you talk to, usually at one of your accounts."
-      pending={save.isPending}
+      pending={save.isPending || checkingDuplicate}
       submitLabel={contact ? "Save contact" : "Add contact"}
-      onSubmit={() => {
+      onSubmit={async () => {
         if (!draft.firstName.trim()) {
           toast.error("First name is required.");
           return;
         }
         const input: ContactInput = { ...draft };
         if (!canAssign || !draft.ownerId) delete input.ownerId;
+
+        const checkKey = `${draft.email}|${draft.phone}`;
+        if (!contact && (draft.email.trim() || draft.phone.trim()) && duplicateCheckedFor !== checkKey) {
+          setCheckingDuplicate(true);
+          const matches = await crmService.findMatchingContacts(draft.email, draft.phone);
+          setCheckingDuplicate(false);
+          setDuplicateCheckedFor(checkKey);
+          if (matches.length > 0) {
+            const match = matches[0];
+            const name = match ? `${match.firstName} ${match.lastName}`.trim() : "";
+            toast.warning(
+              `A contact matching this email or phone already exists${name ? ` (${name})` : ""}. Click "Add contact" again to create a separate one anyway.`,
+            );
+            return;
+          }
+        }
         save.mutate(input);
       }}
     >
@@ -1063,6 +1240,12 @@ export function ContactDialog({
           onChange={(e) => set({ notes: e.target.value })}
         />
       </Field>
+      {contact && activities ? (
+        <RelatedActivityTimeline
+          activities={activities}
+          matches={(a) => a.contactId === contact.id}
+        />
+      ) : null}
     </FormDialog>
   );
 }
@@ -1105,6 +1288,7 @@ export function ActivityDialog({
   deals,
   accounts,
   contacts,
+  existingActivities,
   owners,
   canAssign,
   onClose,
@@ -1116,6 +1300,7 @@ export function ActivityDialog({
   deals: CrmDeal[];
   accounts: CrmAccount[];
   contacts: CrmContact[];
+  existingActivities?: CrmActivity[];
   owners: CrmOwner[];
   canAssign: boolean;
   onClose: () => void;
@@ -1125,6 +1310,7 @@ export function ActivityDialog({
     relatedKindOf(activityDraft(activity, preset)),
   );
   const [due, setDue] = useState(() => toIstInput(activity?.dueAt ?? null));
+  const [confirmDuplicate, setConfirmDuplicate] = useState(false);
   const save = useCrmSave(
     (input: ActivityInput) => crmService.saveActivity(activity?.id ?? null, input),
     activity ? "Activity updated" : "Activity logged",
@@ -1189,6 +1375,43 @@ export function ActivityDialog({
           toast.error(errorText(error));
           return;
         }
+        // Same related record, same owner, same day, another still-planned
+        // activity -- a likely accidental double-booking. Warn once; the
+        // user can still confirm (a genuine second call on the same day is
+        // a real case, so this never hard-blocks).
+        if (!confirmDuplicate && dueAt && draft.status !== "done" && existingActivities) {
+          const dueDay = dueAt.slice(0, 10);
+          const relatedId =
+            kind === "lead"
+              ? draft.leadId
+              : kind === "deal"
+                ? draft.dealId
+                : kind === "account"
+                  ? draft.accountId
+                  : kind === "contact"
+                    ? draft.contactId
+                    : null;
+          const duplicate =
+            relatedId &&
+            existingActivities.some(
+              (other) =>
+                other.id !== activity?.id &&
+                other.status === "planned" &&
+                other.dueAt != null &&
+                other.dueAt.slice(0, 10) === dueDay &&
+                (other.leadId === relatedId ||
+                  other.dealId === relatedId ||
+                  other.accountId === relatedId ||
+                  other.contactId === relatedId),
+            );
+          if (duplicate) {
+            setConfirmDuplicate(true);
+            toast.warning(
+              "Another follow-up is already planned for this record on the same day. Click Save again to add it anyway.",
+            );
+            return;
+          }
+        }
         const input: ActivityInput = { ...draft, dueAt };
         if (!canAssign || !draft.ownerId) delete input.ownerId;
         save.mutate(input);
@@ -1238,7 +1461,10 @@ export function ActivityDialog({
           type="datetime-local"
           className="mt-1.5"
           value={due}
-          onChange={(e) => setDue(e.target.value)}
+          onChange={(e) => {
+            setDue(e.target.value);
+            setConfirmDuplicate(false);
+          }}
         />
       </Field>
       {canAssign ? (
@@ -1259,6 +1485,7 @@ export function ActivityDialog({
           onChange={(e) => {
             setKind(e.target.value as RelatedKind);
             set({ leadId: null, dealId: null, accountId: null, contactId: null });
+            setConfirmDuplicate(false);
           }}
         >
           <option value="none">Nothing</option>
@@ -1274,7 +1501,10 @@ export function ActivityDialog({
             id="activity-related"
             className={selectClass}
             value={relatedValue ?? ""}
-            onChange={(e) => setRelated(e.target.value || null)}
+            onChange={(e) => {
+              setRelated(e.target.value || null);
+              setConfirmDuplicate(false);
+            }}
           >
             <option value="">Choose…</option>
             {related.map((item) => (
@@ -1951,7 +2181,32 @@ const IMPORT_FIELD_SYNONYMS: Record<string, string[]> = {
     "stars",
     "review score",
   ],
+  temperature: [
+    "temperature",
+    "lead temperature",
+    "lead rating",
+    "hot/warm/cold",
+    "hot warm cold",
+    "priority",
+  ],
+  notes: ["notes", "remarks", "details", "comments", "description"],
 };
+
+/** The DB's own first_name limit (crm_leads_first_name_check). Rows over
+ * this are never silently truncated -- they're flagged for the user to fix
+ * or exclude, same rule the server enforces as a backstop. */
+const MAX_FIRST_NAME_LENGTH = 100;
+
+/** "Hot"/"warm"/"cold" (any case, with extra words like "high priority") -> the
+ * exact value crm_leads.rating accepts. Returns null for anything else --
+ * never invents a temperature the sheet didn't actually provide. */
+function parseTemperature(raw: string): "hot" | "warm" | "cold" | null {
+  const value = raw.trim().toLowerCase();
+  if (/\bhot\b/.test(value) || /\bhigh\b/.test(value)) return "hot";
+  if (/\bwarm\b/.test(value) || /\bmedium\b/.test(value) || /\bmed\b/.test(value)) return "warm";
+  if (/\bcold\b/.test(value) || /\blow\b/.test(value)) return "cold";
+  return null;
+}
 
 type ImportField = keyof typeof IMPORT_FIELD_SYNONYMS;
 
@@ -2046,6 +2301,14 @@ interface ImportRow {
   jobTitle?: string;
   estimatedValue?: number | null;
   listingRating?: number | null;
+  rating?: "hot" | "warm" | "cold" | null;
+  notes?: string;
+}
+
+/** A row read from the sheet, before the importable/too-long split: carries
+ * its original sheet row number (1-based, header excluded) for reporting. */
+interface ParsedImportRow extends ImportRow {
+  sheetRow: number;
 }
 
 function parseEstimatedValue(raw: string): number | null {
@@ -2093,15 +2356,33 @@ function meaningfulText(value: string): string {
   return isPlaceholder(trimmed) ? "" : trimmed;
 }
 
-function buildImportRows(headers: string[], sheetRows: string[][]): ImportRow[] {
-  const mapping = mapImportColumns(headers, sheetRows);
+/** Human-readable labels for the mapping-review step, in display order. */
+const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
+  firstName: "Lead name",
+  phone: "Phone",
+  email: "Email",
+  company: "Company",
+  jobTitle: "Job title",
+  estimatedValue: "Estimated value",
+  listingRating: "Listing rating",
+  temperature: "Temperature (Hot/Warm/Cold)",
+  notes: "Notes",
+};
+
+function buildImportRows(
+  headers: string[],
+  sheetRows: string[][],
+  mappingOverride?: Partial<Record<ImportField, number | null>>,
+): ParsedImportRow[] {
+  const mapping = { ...mapImportColumns(headers, sheetRows), ...mappingOverride };
   const cell = (row: string[], field: ImportField) => {
     const index = mapping[field];
     return index == null ? "" : meaningfulText(row[index] ?? "");
   };
   return sheetRows
-    .filter((row) => row.some((value) => value.trim() !== ""))
-    .map((row) => {
+    .map((row, index) => ({ row, sheetRow: index + 1 }))
+    .filter(({ row }) => row.some((value) => value.trim() !== ""))
+    .map(({ row, sheetRow }) => {
       const name = cell(row, "firstName");
       const company = cell(row, "company");
       const email = cell(row, "email");
@@ -2109,6 +2390,7 @@ function buildImportRows(headers: string[], sheetRows: string[][]): ImportRow[] 
       const validEmail = isValidEmail(email) ? email : "";
       const validPhone = isValidPhone(phone) ? phone : "";
       return {
+        sheetRow,
         // Lead Name is never left empty for an importable row: name, else
         // company, else email, else the phone number itself.
         firstName: name || company || validEmail || validPhone,
@@ -2119,6 +2401,8 @@ function buildImportRows(headers: string[], sheetRows: string[][]): ImportRow[] 
         jobTitle: cell(row, "jobTitle"),
         estimatedValue: parseEstimatedValue(cell(row, "estimatedValue")),
         listingRating: parseListingRating(cell(row, "listingRating")),
+        rating: parseTemperature(cell(row, "temperature")),
+        notes: cell(row, "notes"),
       };
     })
     .filter((row) => {
@@ -2128,6 +2412,48 @@ function buildImportRows(headers: string[], sheetRows: string[][]): ImportRow[] 
       // company, a valid email and a valid phone are ALL missing.
       return Boolean(row.firstName);
     });
+}
+
+function PreviewCount({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "success" | "warning" | "destructive" | "neutral";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "border-success/30 bg-success/5 text-success"
+      : tone === "warning"
+        ? "border-warning/30 bg-warning/5 text-warning"
+        : tone === "destructive"
+          ? "border-destructive/30 bg-destructive/5 text-destructive"
+          : "border-input bg-muted/30 text-muted-foreground";
+  return (
+    <div className={cn("rounded-md border p-1.5 text-center", toneClass)}>
+      <p className="text-sm font-bold tabular-nums">{value}</p>
+      <p className="text-[10px] uppercase tracking-wide">{label}</p>
+    </div>
+  );
+}
+
+function describeImportFailureReason(reason: string): string {
+  switch (reason) {
+    case "duplicate":
+      return "Already exists as another lead -- skipped, not modified";
+    case "ambiguous":
+      return "Matched more than one existing lead -- needs manual review";
+    case "not_authorized":
+      return "Matched a lead you do not own or manage";
+    case "invalid":
+      return "No name, company, phone or email found in this row";
+    case "failed":
+      return "Save failed";
+    default:
+      return reason || "Could not process this row";
+  }
 }
 
 function formatFileSize(bytes: number): string {
@@ -2143,20 +2469,43 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
   const [fileSize, setFileSize] = useState(0);
-  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
+  const [sheetRows, setSheetRows] = useState<string[][]>([]);
   const [dataRowCount, setDataRowCount] = useState(0);
+  // null means "use the auto-detected column"; a number is a manual column
+  // index override; a field absent from this map is still auto-detected.
+  // Explicitly set to a sentinel of -1 to mean "skip this column entirely".
+  const [mappingOverride, setMappingOverride] = useState<Partial<Record<ImportField, number>>>({});
+  const [showMapping, setShowMapping] = useState(false);
+  const [lastResult, setLastResult] = useState<{
+    newCount: number;
+    duplicateCount: number;
+    ambiguousCount: number;
+    invalidCount: number;
+    failedCount: number;
+    replacedCount: number;
+    restoredCount: number;
+    failedRows: Array<{ row: number; firstName: string; reason: string; error?: string }>;
+  } | null>(null);
 
   function reset() {
     setFileError(null);
     setFileName("");
     setFileSize(0);
-    setImportRows([]);
+    setSheetHeaders([]);
+    setSheetRows([]);
     setDataRowCount(0);
+    setMappingOverride({});
+    setShowMapping(false);
+    setLastResult(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
   async function handleFile(file: File) {
     setFileError(null);
+    setLastResult(null);
+    setMappingOverride({});
+    setShowMapping(false);
     const isSupported = /\.(csv|xlsx|xls)$/i.test(file.name);
     if (!isSupported) {
       setFileError("Unsupported file type. Upload a .CSV, .XLSX, or .XLS file.");
@@ -2167,44 +2516,90 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
       return;
     }
     try {
-      const { headers: sheetHeaders, rows: sheetRows } = await readSheetRows(file);
-      const nonEmptyRows = sheetRows.filter((row) => row.some((value) => value.trim() !== ""));
-      const rows = buildImportRows(sheetHeaders, sheetRows);
+      const { headers, rows } = await readSheetRows(file);
       setFileName(file.name);
       setFileSize(file.size);
-      setDataRowCount(nonEmptyRows.length);
-      setImportRows(rows);
+      setSheetHeaders(headers);
+      setSheetRows(rows);
+      setDataRowCount(rows.filter((row) => row.some((value) => value.trim() !== "")).length);
     } catch {
       setFileError("Could not read this file. Make sure it is a valid spreadsheet.");
     }
   }
 
-  // dataRowCount > 0 but importRows is empty means every row was read but
+  const autoMapping = useMemo(() => mapImportColumns(sheetHeaders, sheetRows), [sheetHeaders, sheetRows]);
+  // -1 is this component's own "explicitly skipped" sentinel -- translated
+  // to a real `null` (never read as a column) only at the edge, here.
+  const effectiveMapping = useMemo(() => {
+    const result: Partial<Record<ImportField, number | null>> = { ...autoMapping };
+    for (const [field, index] of Object.entries(mappingOverride) as Array<[ImportField, number]>) {
+      result[field] = index === -1 ? null : index;
+    }
+    return result;
+  }, [autoMapping, mappingOverride]);
+  const parsedRows = useMemo(
+    () => buildImportRows(sheetHeaders, sheetRows, effectiveMapping),
+    [sheetHeaders, sheetRows, effectiveMapping],
+  );
+
+  // A name over the database's limit is never silently truncated -- it's
+  // excluded from what gets sent and reported separately, so the user can
+  // see exactly which rows need fixing before retrying.
+  const tooLongRows = useMemo(
+    () => parsedRows.filter((row) => row.firstName.length > MAX_FIRST_NAME_LENGTH),
+    [parsedRows],
+  );
+  const importRows = useMemo(
+    () => parsedRows.filter((row) => row.firstName.length <= MAX_FIRST_NAME_LENGTH),
+    [parsedRows],
+  );
+
+  // dataRowCount > 0 but parsedRows is empty means every row was read but
   // none had a name, valid phone, valid email or company -- distinct from
   // a sheet that has headers but no data rows at all.
   const noDataRows = fileName !== "" && dataRowCount === 0;
-  const noImportableRows = fileName !== "" && dataRowCount > 0 && importRows.length === 0;
+  const noImportableRows = fileName !== "" && dataRowCount > 0 && parsedRows.length === 0;
   const missingColumnMessage = noImportableRows
     ? "No importable leads found. The sheet needs at least a name, phone, email or company column."
     : noDataRows
       ? "This sheet has no data rows."
       : null;
 
+  // Server-side preview: accurate counts need to query the live database
+  // (ambiguous-match detection and the replace count in particular can't
+  // be done client-side), so this is a real read-only RPC call, not a
+  // client guess. One universal workflow -- no mode to pass.
+  const preview = useQuery({
+    queryKey: ["crm-import-preview", importRows],
+    queryFn: () => crmService.previewImportLeads(importRows),
+    enabled: importRows.length > 0,
+  });
+
   const importMutation = useMutation({
     mutationFn: () => crmService.importLeads(fileName, importRows),
     onSuccess: (result) => {
-      toast.success(
-        `${result.insertedCount} lead${result.insertedCount === 1 ? "" : "s"} imported` +
-          (result.duplicateCount > 0
-            ? `, ${result.duplicateCount} skipped as duplicate${result.duplicateCount === 1 ? "" : "s"}`
-            : "") +
-          (result.restoredCount > 0
-            ? `, ${result.restoredCount} hand-added lead${result.restoredCount === 1 ? "" : "s"} restored`
-            : ""),
-      );
+      const parts = [
+        result.newCount > 0 ? `${result.newCount} new lead${result.newCount === 1 ? "" : "s"} imported` : "",
+        result.replacedCount > 0
+          ? `${result.replacedCount} previously imported lead${result.replacedCount === 1 ? "" : "s"} replaced`
+          : "",
+        result.restoredCount > 0
+          ? `${result.restoredCount} manually added lead${result.restoredCount === 1 ? "" : "s"} kept`
+          : "",
+        result.duplicateCount > 0 ? `${result.duplicateCount} duplicate` : "",
+        result.ambiguousCount > 0 ? `${result.ambiguousCount} ambiguous` : "",
+        result.invalidCount > 0 ? `${result.invalidCount} invalid` : "",
+        result.failedCount > 0
+          ? `${result.failedCount} row${result.failedCount === 1 ? "" : "s"} failed`
+          : "",
+      ].filter(Boolean);
+      toast.success(parts.length > 0 ? parts.join(", ") : "Nothing to import");
+      setLastResult(result);
       void queryClient.invalidateQueries({ queryKey: CRM_QUERY_KEY });
-      reset();
-      onClose();
+      if (result.failedCount === 0 && result.ambiguousCount === 0 && result.invalidCount === 0) {
+        reset();
+        onClose();
+      }
     },
     onError: (error) => setFileError(errorText(error)),
   });
@@ -2232,7 +2627,8 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
             </span>
           </div>
           <DialogDescription>
-            Upload a CSV or Excel sheet to add leads to your pipeline.
+            Upload a CSV or Excel sheet. This replaces leads from your last import with this
+            sheet's leads -- manually added leads and other reps' leads are never affected.
           </DialogDescription>
         </DialogHeader>
 
@@ -2277,30 +2673,158 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{fileName}</p>
                     <p className="text-xs text-muted-foreground">
-                      {formatFileSize(fileSize)} · {rowCount} row{rowCount === 1 ? "" : "s"}{" "}
+                      {formatFileSize(fileSize)} · {dataRowCount} row{dataRowCount === 1 ? "" : "s"}{" "}
                       detected · UTF-8 Encoded
                     </p>
                   </div>
                 </div>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-0.5 text-xs font-semibold text-success ring-1 ring-inset ring-success/20">
-                  <CheckCircle2 className="size-3.5" /> Validated
-                </span>
+                {tooLongRows.length > 0 ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/12 px-2.5 py-0.5 text-xs font-semibold text-warning ring-1 ring-inset ring-warning/20">
+                    {tooLongRows.length} need{tooLongRows.length === 1 ? "s" : ""} attention
+                  </span>
+                ) : (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-0.5 text-xs font-semibold text-success ring-1 ring-inset ring-success/20">
+                    <CheckCircle2 className="size-3.5" /> Validated
+                  </span>
+                )}
               </div>
               <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full w-full rounded-full bg-success" />
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    tooLongRows.length > 0 ? "bg-warning" : "bg-success",
+                  )}
+                  style={{
+                    width: `${dataRowCount === 0 ? 100 : Math.round((importRows.length / dataRowCount) * 100)}%`,
+                  }}
+                />
               </div>
-              <div className="mt-1.5 flex items-center justify-between">
+              <div className="mt-1.5 flex items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
-                  File parsed and verified successfully
+                  {importRows.length} row{importRows.length === 1 ? "" : "s"} ready to import
+                  {tooLongRows.length > 0
+                    ? ` · ${tooLongRows.length} row${tooLongRows.length === 1 ? "" : "s"} over the ${MAX_FIRST_NAME_LENGTH}-character name limit, excluded`
+                    : ""}
                 </p>
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="inline-flex items-center gap-1 text-xs font-medium text-destructive hover:underline"
-                >
-                  <Trash2 className="size-3.5" /> Remove
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => inputRef.current?.click()}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <UploadCloud className="size-3.5" /> Replace
+                  </button>
+                  <button
+                    type="button"
+                    onClick={reset}
+                    className="inline-flex items-center gap-1 text-xs font-medium text-destructive hover:underline"
+                  >
+                    <Trash2 className="size-3.5" /> Remove
+                  </button>
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowMapping((v) => !v)}
+                className="mt-2 text-xs font-medium text-primary hover:underline"
+              >
+                {showMapping ? "Hide column mapping" : "Review column mapping"}
+              </button>
+              {showMapping ? (
+                <div className="mt-2 space-y-1.5 rounded-md border border-input bg-muted/20 p-2">
+                  <p className="text-xs text-muted-foreground">
+                    Detected columns below. Change any field to a different sheet column, or set it
+                    to "Not in this sheet" to skip it.
+                  </p>
+                  {(Object.keys(IMPORT_FIELD_LABELS) as ImportField[]).map((field) => {
+                    const current = effectiveMapping[field];
+                    return (
+                      <div key={field} className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-medium">{IMPORT_FIELD_LABELS[field]}</span>
+                        <select
+                          className={cn(selectClass, "h-7 w-44 text-xs")}
+                          value={current == null ? "-1" : String(current)}
+                          onChange={(e) =>
+                            setMappingOverride((prev) => ({
+                              ...prev,
+                              [field]: Number(e.target.value),
+                            }))
+                          }
+                        >
+                          <option value="-1">Not in this sheet</option>
+                          {sheetHeaders.map((header, index) => (
+                            <option key={index} value={index}>
+                              {header || `Column ${index + 1}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+              {tooLongRows.length > 0 ? (
+                <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-warning/30 bg-warning/5 p-2">
+                  <p className="mb-1 text-xs font-semibold text-warning">
+                    Rows excluded -- name longer than {MAX_FIRST_NAME_LENGTH} characters:
+                  </p>
+                  <ul className="space-y-0.5">
+                    {tooLongRows.slice(0, 20).map((row) => (
+                      <li key={row.sheetRow} className="truncate text-xs text-muted-foreground">
+                        Row {row.sheetRow}: {row.firstName.slice(0, 60)}…
+                      </li>
+                    ))}
+                    {tooLongRows.length > 20 ? (
+                      <li className="text-xs text-muted-foreground">
+                        …and {tooLongRows.length - 20} more
+                      </li>
+                    ) : null}
+                  </ul>
+                </div>
+              ) : null}
+              {preview.data ? (
+                <>
+                  <div className="mt-3 grid grid-cols-3 gap-1.5 text-xs">
+                    <PreviewCount label="New" value={preview.data.newCount} tone="success" />
+                    <PreviewCount label="Duplicate" value={preview.data.duplicateCount} tone="neutral" />
+                    <PreviewCount label="Ambiguous" value={preview.data.ambiguousCount} tone="warning" />
+                  </div>
+                  {preview.data.replaceCount > 0 ? (
+                    <p className="mt-2 rounded-md border border-warning/30 bg-warning/5 p-2 text-xs text-warning">
+                      This will replace {preview.data.replaceCount} lead
+                      {preview.data.replaceCount === 1 ? "" : "s"} from your previous import.
+                      Manually added leads and other reps' leads are never affected.
+                    </p>
+                  ) : null}
+                </>
+              ) : preview.isLoading ? (
+                <p className="mt-3 text-xs text-muted-foreground">Checking against existing leads…</p>
+              ) : null}
+              {preview.data && (preview.data.ambiguousCount > 0 || preview.data.invalidCount > 0) ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Rows matching more than one existing lead are never guessed -- they are skipped
+                  and reported after import so you can review them, fix the sheet, and retry just
+                  those rows. A row matching a lead that will survive this import (someone else's
+                  lead, a manually added lead, or a different past import) is skipped as a
+                  duplicate, never modified.
+                </p>
+              ) : null}
+              {lastResult && lastResult.failedRows.length > 0 ? (
+                <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 p-2">
+                  <p className="mb-1 text-xs font-semibold text-destructive">
+                    {lastResult.failedRows.length} row{lastResult.failedRows.length === 1 ? "" : "s"}{" "}
+                    not imported or updated:
+                  </p>
+                  <ul className="space-y-0.5">
+                    {lastResult.failedRows.slice(0, 20).map((row) => (
+                      <li key={row.row} className="truncate text-xs text-muted-foreground">
+                        Row {row.row} ({row.firstName}): {describeImportFailureReason(row.reason)}
+                        {row.error ? ` -- ${row.error}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -2324,7 +2848,9 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
         <DialogFooter className="flex items-center justify-between sm:justify-between">
           <p className="text-sm text-muted-foreground">
             {rowCount > 0
-              ? `Ready to import ${rowCount} prospect${rowCount === 1 ? "" : "s"} into pipeline`
+              ? preview.data && preview.data.replaceCount > 0
+                ? `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"} and replace ${preview.data.replaceCount} lead${preview.data.replaceCount === 1 ? "" : "s"} from your last import`
+                : `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"}`
               : fileName
                 ? "This file cannot be imported"
                 : "No file selected"}
@@ -2341,7 +2867,11 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
               Cancel
             </Button>
             <Button disabled={!canImport} onClick={() => importMutation.mutate()}>
-              {importMutation.isPending ? "Importing…" : `Import ${rowCount} Leads`}
+              {importMutation.isPending
+                ? "Processing…"
+                : preview.data && preview.data.replaceCount > 0
+                  ? `Replace & Import ${rowCount} Rows`
+                  : `Import ${rowCount} Rows`}
             </Button>
           </div>
         </DialogFooter>

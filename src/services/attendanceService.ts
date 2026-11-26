@@ -24,6 +24,9 @@ import {
 } from "./api";
 import { workService } from "./workService";
 
+/** Thrown when punch_attendance rejects an early check-in (before 10:00 IST) -- nothing is saved. */
+export class EarlyCheckInError extends Error {}
+
 const COMP_OFF_FLAG = "comp-off-eligible";
 const MISSED_CHECKOUT_FLAG = "missed-checkout";
 const DEFAULT_HALF_DAY_HOURS = 4;
@@ -590,7 +593,13 @@ export const attendanceService = {
       p_employee_id: resolved,
       p_action: field,
     });
-    if (error) throw error;
+    if (error) {
+      const message = typeof error.message === "string" ? error.message : "";
+      if (message.includes("EARLY_CHECK_IN:")) {
+        throw new EarlyCheckInError(message.split("EARLY_CHECK_IN:")[1]?.trim() || message);
+      }
+      throw error;
+    }
     return data;
   },
 

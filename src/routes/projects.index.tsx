@@ -101,7 +101,11 @@ function ProjectsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const canCreate =
-    role === "admin" || role === "hr" || role === "dept_head" || role === "team_lead";
+    role === "admin" ||
+    role === "hr" ||
+    role === "dept_head" ||
+    role === "team_lead" ||
+    role === "general_manager";
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ProjectDraft>(emptyDraft);
   const [directoryQuery, setDirectoryQuery] = useState("");

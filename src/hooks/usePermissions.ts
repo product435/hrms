@@ -30,7 +30,7 @@ export function usePermissions() {
     isLead,
     isEmployee,
     canManageTeam: isSuperAdmin || isHr || isLead,
-    canDecideApprovals: isSuperAdmin || isHr || isLead,
+    canDecideApprovals: isSuperAdmin || isHr || isGeneralManager || isLead,
     crm: session.user.crm ?? NO_CRM_ACCESS,
   };
 }
