@@ -38,7 +38,64 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { dayMonth, shortDate } from "@/lib/format";
 import { HOW_LEAVE_WORKS, leaveTypeHint } from "@/lib/leave-hints";
+import { cn } from "@/lib/utils";
 import type { LeaveRequest } from "@/types";
+
+/** Same visual language as StatCard, but with room for three lines
+ * (remaining, taken-of-allocation, extra) instead of one hint string --
+ * kept local to this page rather than widening the shared StatCard. */
+function LeaveBalanceCard({
+  typeName,
+  remaining,
+  taken,
+  allocated,
+  extra,
+  tone,
+}: {
+  typeName: string;
+  remaining: number;
+  taken: number;
+  allocated: number;
+  extra: number;
+  tone: "info" | "accent" | "success";
+}) {
+  const toneClass = {
+    info: "bg-info/12 text-info",
+    accent: "bg-accent/15 text-accent",
+    success: "bg-success/12 text-success",
+  }[tone];
+  return (
+    <article className="surface-card group relative overflow-hidden p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-float sm:p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1">
+            <p className="truncate text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              {typeName} balance
+            </p>
+            <InfoHint label={`About ${typeName} leave`}>{leaveTypeHint(typeName)}</InfoHint>
+          </div>
+          <p className="mt-2 font-display text-3xl font-bold leading-none tracking-tight">
+            {remaining}
+          </p>
+        </div>
+        <span
+          className={cn(
+            "grid size-11 shrink-0 place-items-center rounded-2xl transition-transform duration-200 group-hover:scale-105",
+            toneClass,
+          )}
+        >
+          <ClipboardList className="size-5" />
+        </span>
+      </div>
+      <div className="mt-3 space-y-0.5 text-xs text-muted-foreground">
+        <p>
+          Taken: {taken} of {allocated}
+        </p>
+        {extra > 0 ? <p className="font-medium text-warning">Extra: {extra}</p> : null}
+      </div>
+    </article>
+  );
+}
 
 function errorDescription(error: unknown) {
   if (error instanceof Error && error.message.trim()) return error.message;
@@ -117,6 +174,48 @@ function LeavePage() {
     queryFn: () => leaveService.ledger(user.employeeId ?? user.id),
   });
 
+  // Pre-submit preview only -- the server (enforce_leave_request_integrity)
+  // is the real source of truth for the deducted/excess split; this just
+  // mirrors that same math client-side so the note appears before
+  // submission, per the requirement that exceeding the balance must never
+  // block the request.
+  const requestedDays = useMemo(() => {
+    if (!form.from || !form.to) return 0;
+    const span =
+      Math.round((new Date(form.to).getTime() - new Date(form.from).getTime()) / 86400000) + 1;
+    return span > 0 ? span : 0;
+  }, [form.from, form.to]);
+  const selectedTypeRemaining = useMemo(() => {
+    const entry = (balance.data ?? []).find((b) => b.name === form.type);
+    return entry?.remaining ?? null;
+  }, [balance.data, form.type]);
+  const submitPreview = useMemo(() => {
+    if (requestedDays <= 0 || selectedTypeRemaining == null) return null;
+    const fromBalance = Math.min(requestedDays, Math.max(selectedTypeRemaining, 0));
+    const extra = requestedDays - fromBalance;
+    return { fromBalance, extra };
+  }, [requestedDays, selectedTypeRemaining]);
+
+  // Informational only -- the monthly cap no longer blocks submission.
+  // Live, server-computed (not derived from balance.data), since it
+  // depends on OTHER requests this month, not this leave type's balance.
+  const monthlyCapPreview = useQuery({
+    queryKey: ["leave-monthly-cap-preview", form.from, form.to, requestedDays],
+    queryFn: () => leaveService.monthlyCapPreview(form.from, form.to, requestedDays),
+    enabled: open && requestedDays > 0,
+  });
+  const monthlyCapExceeded = (monthlyCapPreview.data ?? []).find((m) => m.exceeds) ?? null;
+
+  // Same flag, batched for every request currently in view, so the
+  // approver (and the requester's own table) sees it without one RPC call
+  // per row.
+  const requestIds = useMemo(() => (requests.data ?? []).map((r) => r.id), [requests.data]);
+  const monthlyCapFlags = useQuery({
+    queryKey: ["leave-monthly-cap-flags", requestIds],
+    queryFn: () => leaveService.monthlyCapFlags(requestIds),
+    enabled: requestIds.length > 0,
+  });
+
   const apply = useMutation({
     mutationFn: () => leaveService.apply(form),
     onSuccess: () => {
@@ -193,7 +292,21 @@ function LeavePage() {
         key: "days",
         header: "Days",
         align: "right",
-        cell: (row) => <span className="text-sm">{row.days}</span>,
+        cell: (row) => (
+          <span className="text-sm">
+            {row.days}
+            {row.excessDays > 0 ? (
+              <span className="ml-1.5 text-xs font-medium text-warning">
+                ({row.excessDays} extra)
+              </span>
+            ) : null}
+            {monthlyCapFlags.data?.has(row.id) ? (
+              <span className="ml-1.5 text-xs font-medium text-warning">
+                (over monthly limit)
+              </span>
+            ) : null}
+          </span>
+        ),
       },
       {
         key: "reason",
@@ -276,7 +389,7 @@ function LeavePage() {
           ]
         : []),
     ],
-    [canDecide, cancel.isPending, decide, isSelfService, user],
+    [canDecide, cancel.isPending, decide, isSelfService, user, monthlyCapFlags.data],
   );
 
   const pendingCount = (requests.data ?? []).filter((r) => r.status === "pending").length;
@@ -370,6 +483,28 @@ function LeavePage() {
                     />
                   </div>
                 </div>
+                {submitPreview && submitPreview.extra > 0 ? (
+                  <p
+                    role="status"
+                    className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+                  >
+                    {submitPreview.fromBalance} day{submitPreview.fromBalance === 1 ? "" : "s"} from
+                    balance, {submitPreview.extra} day{submitPreview.extra === 1 ? "" : "s"} extra.
+                    This request will still be submitted.
+                  </p>
+                ) : null}
+                {monthlyCapExceeded ? (
+                  <p
+                    role="status"
+                    className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+                  >
+                    Monthly limit is {monthlyCapExceeded.limitDays} day
+                    {monthlyCapExceeded.limitDays === 1 ? "" : "s"} for{" "}
+                    {monthlyCapExceeded.monthLabel} (you already have{" "}
+                    {monthlyCapExceeded.alreadyUsed} this month). This request exceeds it but will
+                    still be submitted.
+                  </p>
+                ) : null}
                 <div className="grid gap-2">
                   <Label htmlFor="leave-reason">Reason</Label>
                   <Textarea
@@ -405,17 +540,20 @@ function LeavePage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {(balance.data ?? []).map((entry, index) => {
           const tones = ["info", "accent", "success"] as const;
+          const tone = tones[index % tones.length] ?? "info";
+          // Taken includes extra days (days taken beyond the balance);
+          // the allocation (Y) never changes, so Taken can visibly exceed
+          // it -- that's what makes a separate Extra line meaningful.
+          const taken = entry.used + entry.extra;
           return (
-            <StatCard
+            <LeaveBalanceCard
               key={entry.id}
-              label={`${entry.name} balance`}
-              value={String(entry.remaining)}
-              icon={ClipboardList}
-              tone={tones[index % tones.length] ?? "info"}
-              hint={`${entry.used} used of ${entry.allocated}`}
-              info={
-                <InfoHint label={`About ${entry.name} leave`}>{leaveTypeHint(entry.name)}</InfoHint>
-              }
+              typeName={entry.name}
+              remaining={entry.remaining}
+              taken={taken}
+              allocated={entry.allocated}
+              extra={entry.extra}
+              tone={tone}
             />
           );
         })}

@@ -26,6 +26,7 @@ function mapLeave(row: any): LeaveRequest {
     from: row.start_date,
     to: row.end_date,
     days: Number(row.total_days ?? 0),
+    excessDays: Number(row.excess_days ?? 0),
     reason: row.reason,
     status: row.status,
     appliedOn: ledgerRow?.created_at ?? row.start_date,
@@ -102,9 +103,21 @@ export const leaveService = {
   // leave_ledger_trigger on leave_requests -- never client-written -- so this
   // always reflects a real, persisted transaction history rather than a live
   // recomputation.
-  async balance(
-    employeeId: string,
-  ): Promise<{ id: string; name: string; allocated: number; used: number; remaining: number }[]> {
+  async balance(employeeId: string): Promise<
+    {
+      id: string;
+      name: string;
+      allocated: number;
+      used: number;
+      remaining: number;
+      /** Days taken beyond the balance (included in `used`), from
+       * still-live requests (pending or approved) this year. A rejected
+       * or cancelled request's excess was never actually taken, so it is
+       * excluded here the same way its deducted days are excluded from
+       * `used` via the ledger credit-back. */
+      extra: number;
+    }[]
+  > {
     if (!isSupabaseConfigured || !supabase) {
       const employee = fixtureEmployees.find((e) => e.id === employeeId);
       const bal = employee?.leaveBalance ?? { casual: 0, sick: 0, earned: 0, unpaid: 0 };
@@ -115,23 +128,42 @@ export const leaveService = {
           allocated: remaining,
           used: 0,
           remaining,
+          extra: 0,
         })),
       );
     }
     const resolved = await requireEmployeeId(employeeId);
     const year = new Date().getFullYear();
-    const [{ data: types, error: typesError }, { data: ledger, error: ledgerError }] =
-      await Promise.all([
-        supabase.from("leave_types").select("id,name,annual_limit").order("name"),
-        supabase
-          .from("leave_ledger")
-          .select("leave_type_id,change_days")
-          .eq("employee_id", resolved)
-          .gte("created_at", `${year}-01-01`)
-          .lte("created_at", `${year}-12-31`),
-      ]);
+    const [
+      { data: types, error: typesError },
+      { data: ledger, error: ledgerError },
+      { data: excessRows, error: excessError },
+    ] = await Promise.all([
+      supabase.from("leave_types").select("id,name,annual_limit").order("name"),
+      supabase
+        .from("leave_ledger")
+        .select("leave_type_id,change_days")
+        .eq("employee_id", resolved)
+        .gte("created_at", `${year}-01-01`)
+        .lte("created_at", `${year}-12-31`),
+      // excess_days is added by a pending migration not yet reflected in
+      // the generated Supabase types -- cast through `any` like the rest
+      // of this file does for the same reason (see the file-level
+      // eslint-disable above).
+      (supabase as any)
+        .from("leave_requests")
+        .select("leave_type_id,excess_days,start_date,status")
+        .eq("employee_id", resolved)
+        .in("status", ["pending", "approved"])
+        .gte("start_date", `${year}-01-01`)
+        .lte("start_date", `${year}-12-31`) as Promise<{
+        data: { leave_type_id: string | null; excess_days: number | null }[] | null;
+        error: { message?: string } | null;
+      }>,
+    ]);
     if (typesError) throw typesError;
     if (ledgerError) throw ledgerError;
+    if (excessError) throw excessError;
     const usedByType = new Map<string, number>();
     (ledger ?? []).forEach((r) => {
       if (!r.leave_type_id) return;
@@ -140,6 +172,14 @@ export const leaveService = {
       usedByType.set(
         r.leave_type_id,
         (usedByType.get(r.leave_type_id) ?? 0) - Number(r.change_days ?? 0),
+      );
+    });
+    const extraByType = new Map<string, number>();
+    (excessRows ?? []).forEach((r) => {
+      if (!r.leave_type_id) return;
+      extraByType.set(
+        r.leave_type_id,
+        (extraByType.get(r.leave_type_id) ?? 0) + Number(r.excess_days ?? 0),
       );
     });
     return (types ?? []).map((t) => {
@@ -151,8 +191,53 @@ export const leaveService = {
         allocated,
         used,
         remaining: Math.max(allocated - used, 0),
+        extra: extraByType.get(t.id) ?? 0,
       };
     });
+  },
+  // Informational only -- the monthly cap no longer blocks submission or
+  // approval (enforce_leave_request_integrity() no longer calls
+  // assert_monthly_leave_cap()). This mirrors the exact same math,
+  // read-only, for the "Apply for leave" dialog's pre-submit note.
+  async monthlyCapPreview(
+    from: string,
+    to: string,
+    totalDays: number,
+  ): Promise<{ monthLabel: string; limitDays: number; alreadyUsed: number; wouldAdd: number; exceeds: boolean }[]> {
+    if (!isSupabaseConfigured || !supabase || !from || !to || totalDays <= 0) return [];
+    const employeeId = await requireEmployeeId();
+    const { data, error } = await (supabase as any).rpc("leave_monthly_cap_preview", {
+      p_employee_id: employeeId,
+      p_start: from,
+      p_end: to,
+      p_total: totalDays,
+      p_exclude_request_id: null,
+    });
+    if (error) throw new Error(error.message || "Could not check the monthly limit.");
+    return (data ?? []).map((row: any) => ({
+      monthLabel: row.month_label ?? "",
+      limitDays: Number(row.limit_days ?? 0),
+      alreadyUsed: Number(row.already_used ?? 0),
+      wouldAdd: Number(row.would_add ?? 0),
+      exceeds: Boolean(row.exceeds),
+    }));
+  },
+  // Batched, for a list of already-submitted requests (the approver's
+  // table, or the requester's own) -- one call per visible page instead
+  // of one per row. Returns a Set of request ids that currently exceed
+  // their month's cap, computed live against the CURRENT state of that
+  // employee's other requests each time this is called.
+  async monthlyCapFlags(requestIds: string[]): Promise<Set<string>> {
+    if (!isSupabaseConfigured || !supabase || requestIds.length === 0) return new Set();
+    const { data, error } = await (supabase as any).rpc("leave_monthly_cap_flags", {
+      p_request_ids: requestIds,
+    });
+    if (error) throw new Error(error.message || "Could not check the monthly limit.");
+    return new Set(
+      (data ?? [])
+        .filter((row: any) => row.exceeds_monthly_limit)
+        .map((row: any) => row.request_id as string),
+    );
   },
   // Raw transaction history for the leave ledger/history view.
   async ledger(employeeId: string): Promise<

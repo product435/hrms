@@ -155,14 +155,43 @@ const DWR_STATUS_DOT: Record<DwrStatus, string> = {
 
 const DWR_STATUS_MODIFIER_CLASSNAMES: Record<DwrStatus, string> = {
   draft:
-    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-muted-foreground after:content-['']",
+    "relative after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-muted-foreground after:content-['']",
   submitted:
-    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-success after:content-['']",
+    "relative after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-success after:content-['']",
   late:
-    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
+    "relative after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
   missed:
-    "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
+    "relative after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
 };
+
+/**
+ * Shared look for both report calendars (requirement: same design in both
+ * places). Only adds a visible ring around today -- everything else
+ * (outside-month muting, disabled fade/contrast) stays exactly the base
+ * Calendar component's own default styling, unchanged.
+ */
+const CALENDAR_DOT_CLASSNAMES = {
+  day: "p-0.5",
+  today: "ring-1 ring-inset ring-primary rounded-md",
+};
+
+/**
+ * react-day-picker hands every calendar cell to us as a *local-midnight*
+ * Date for the day it's drawing -- not an IST instant. Re-running that
+ * through indiaDateKey() re-interprets it in IST and, for any viewer whose
+ * browser clock is ahead of IST (e.g. Tokyo, UTC+9), silently shifts the
+ * key a day later than the cell actually shown (local midnight Dec 1 is
+ * already "Nov 30" IST, so Dec 1's own real status lands on the Dec 2
+ * cell instead). Reading the cell's own local fields keeps the key
+ * exactly matched to the day number the grid displays, which is what
+ * must line up with the IST-keyed report_date string from the database.
+ */
+function calendarCellKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 /** Shared by both the left-side date picker and the right-side calendar. */
 function useReportStatusByDate(reports: DailyWorkReport[], me: string) {
@@ -175,12 +204,17 @@ function useReportStatusByDate(reports: DailyWorkReport[], me: string) {
   }, [reports, me]);
 }
 
-function reportStatusModifiers(byDate: Map<string, DwrStatus>) {
+/** No future date may ever carry a status dot, regardless of what's stored. */
+function reportStatusModifiers(byDate: Map<string, DwrStatus>, today: string) {
+  const statusOn = (date: Date, status: DwrStatus) => {
+    const key = calendarCellKey(date);
+    return key <= today && byDate.get(key) === status;
+  };
   return {
-    draft: (date: Date) => byDate.get(indiaDateKey(date)) === "draft",
-    submitted: (date: Date) => byDate.get(indiaDateKey(date)) === "submitted",
-    late: (date: Date) => byDate.get(indiaDateKey(date)) === "late",
-    missed: (date: Date) => byDate.get(indiaDateKey(date)) === "missed",
+    draft: (date: Date) => statusOn(date, "draft"),
+    submitted: (date: Date) => statusOn(date, "submitted"),
+    late: (date: Date) => statusOn(date, "late"),
+    missed: (date: Date) => statusOn(date, "missed"),
   };
 }
 
@@ -231,16 +265,9 @@ function ReportDatePicker({
   me: string;
 }) {
   const [open, setOpen] = useState(false);
-  const byDate = useMemo(() => {
-    const map = new Map<string, DwrStatus>();
-    for (const report of reports) {
-      if (report.employeeId === me) map.set(report.reportDate, report.status);
-    }
-    return map;
-  }, [reports, me]);
+  const byDate = useReportStatusByDate(reports, me);
 
   const selectedDate = new Date(`${value}T00:00:00`);
-  const todayDate = new Date(`${today}T00:00:00`);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -274,41 +301,12 @@ function ReportDatePicker({
             onSelect(indiaDateKey(date));
             setOpen(false);
           }}
-          modifiers={{
-            draft: (date) => byDate.get(indiaDateKey(date)) === "draft",
-            submitted: (date) => byDate.get(indiaDateKey(date)) === "submitted",
-            late: (date) => byDate.get(indiaDateKey(date)) === "late",
-            missed: (date) => byDate.get(indiaDateKey(date)) === "missed",
-          }}
-          modifiersClassNames={{
-            draft: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-muted-foreground after:content-['']",
-            submitted: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-success after:content-['']",
-            late: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-warning after:content-['']",
-            missed: "after:absolute after:bottom-1 after:left-1/2 after:size-1.5 after:-translate-x-1/2 after:rounded-full after:bg-destructive after:content-['']",
-          }}
-          classNames={{
-            day: "p-0.5",
-            // Only today is enabled here, so "disabled" below means every
-            // other, non-today date -- keep it clearly readable (not
-            // faded/low-contrast) rather than the base calendar's default
-            // opacity-50, while today and the selected day stay visibly
-            // highlighted via the base component's own today/selected styles.
-            disabled: "text-foreground/70 opacity-100",
-          }}
+          modifiers={reportStatusModifiers(byDate, today)}
+          modifiersClassNames={DWR_STATUS_MODIFIER_CLASSNAMES}
+          classNames={CALENDAR_DOT_CLASSNAMES}
         />
-        <div className="flex items-center gap-3 rounded-b-xl border-t bg-muted/40 px-3 py-2.5 text-xs text-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-success" /> Submitted
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-warning" /> Late
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-destructive" /> Missed
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-muted-foreground" /> Draft
-          </span>
+        <div className="rounded-b-xl border-t bg-muted/40 px-3 py-2.5">
+          <ReportStatusLegend />
         </div>
       </PopoverContent>
     </Popover>
@@ -365,14 +363,9 @@ function RecentReportsCalendar({
             onSelectDate(indiaDateKey(date));
             setOpen(false);
           }}
-          modifiers={reportStatusModifiers(byDate)}
+          modifiers={reportStatusModifiers(byDate, today)}
           modifiersClassNames={DWR_STATUS_MODIFIER_CLASSNAMES}
-          classNames={{
-            day: "p-0.5",
-            // Only future dates are disabled here -- every past date stays
-            // clickable (opens read-only) and must read clearly, not faded.
-            disabled: "text-foreground/40",
-          }}
+          classNames={CALENDAR_DOT_CLASSNAMES}
         />
         <div className="rounded-b-xl border-t bg-muted/40 px-3 py-2.5">
           <ReportStatusLegend />

@@ -174,7 +174,14 @@ export interface CrmLead extends CrmOwned {
   demoNotes: string;
   nextFollowUpAt: string | null;
   importBatchId: string | null;
+  /** Which sheet this lead is currently grouped/displayed with -- set for
+   * both imported and hand-added leads, and moved forward to a later
+   * import that replaces the earlier one. Never deleted, just re-tagged. */
+  activeBatchId: string | null;
   importSequence: number | null;
+  /** Spreadsheet columns from import that don't map to a known field,
+   * keyed by their original file header text exactly as uploaded. */
+  importExtraFields: Record<string, string>;
 }
 
 export interface CrmDeal extends CrmOwned {
@@ -218,7 +225,9 @@ export type LeadInput = Omit<
   | "convertedContactId"
   | "convertedDealId"
   | "importBatchId"
+  | "activeBatchId"
   | "importSequence"
+  | "importExtraFields"
 > & {
   ownerId?: string;
 };

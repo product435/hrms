@@ -2303,12 +2303,22 @@ interface ImportRow {
   listingRating?: number | null;
   rating?: "hot" | "warm" | "cold" | null;
   notes?: string;
+  /** Every sheet column that doesn't map to a known field above, keyed by
+   * its original file header text exactly as uploaded. Never requires
+   * manual mapping -- any column not claimed by a known field lands here
+   * automatically. */
+  extraFields: Record<string, string>;
 }
 
-/** A row read from the sheet, before the importable/too-long split: carries
- * its original sheet row number (1-based, header excluded) for reporting. */
+/** A row read from the sheet, already shortened to the DB's first_name
+ * limit if needed: carries its original sheet row number (1-based, header
+ * excluded) for reporting, the full un-shortened name, and whether
+ * shortening actually happened (so the dialog can list it as a warning,
+ * never as an exclusion -- the row is still imported). */
 interface ParsedImportRow extends ImportRow {
   sheetRow: number;
+  fullName: string;
+  wasShortened: boolean;
 }
 
 function parseEstimatedValue(raw: string): number | null {
@@ -2356,44 +2366,93 @@ function meaningfulText(value: string): string {
   return isPlaceholder(trimmed) ? "" : trimmed;
 }
 
-/** Human-readable labels for the mapping-review step, in display order. */
-const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
-  firstName: "Lead name",
-  phone: "Phone",
-  email: "Email",
-  company: "Company",
-  jobTitle: "Job title",
-  estimatedValue: "Estimated value",
-  listingRating: "Listing rating",
-  temperature: "Temperature (Hot/Warm/Cold)",
-  notes: "Notes",
-};
+/** Shortens a name to at most `max` characters at a word boundary (never
+ * mid-word), falling back to a hard cut only if a single "word" is itself
+ * longer than the limit. Never used to silently drop data -- the caller is
+ * responsible for preserving the full original name elsewhere (notes). */
+function shortenAtWordBoundary(name: string, max: number): string {
+  if (name.length <= max) return name;
+  const truncated = name.slice(0, max);
+  const lastSpace = truncated.lastIndexOf(" ");
+  // Only break at the space if it leaves a reasonably sized result --
+  // otherwise (e.g. one giant word with no spaces near the limit) a hard
+  // cut at `max` is the only option.
+  if (lastSpace > max * 0.5) {
+    return truncated.slice(0, lastSpace).trimEnd();
+  }
+  return truncated.trimEnd();
+}
+
+/** A row read from the sheet that had some non-empty cell but produced no
+ * usable name/company/phone/email after placeholder stripping -- reported
+ * explicitly so the dialog's counts always add up to the detected row
+ * count, instead of silently vanishing. */
+interface InvalidImportRow {
+  sheetRow: number;
+}
 
 function buildImportRows(
   headers: string[],
   sheetRows: string[][],
-  mappingOverride?: Partial<Record<ImportField, number | null>>,
-): ParsedImportRow[] {
-  const mapping = { ...mapImportColumns(headers, sheetRows), ...mappingOverride };
+): { rows: ParsedImportRow[]; invalidRows: InvalidImportRow[] } {
+  const mapping = mapImportColumns(headers, sheetRows);
+  const claimedIndexes = new Set(Object.values(mapping));
   const cell = (row: string[], field: ImportField) => {
     const index = mapping[field];
     return index == null ? "" : meaningfulText(row[index] ?? "");
   };
-  return sheetRows
+  // Every column not claimed by a known field, with a real (non-blank)
+  // header, is an "extra" column -- saved under its own original header
+  // text, no manual mapping ever required.
+  const extraHeaderIndexes = headers
+    .map((header, index) => ({ header: header.trim(), index }))
+    .filter(({ header, index }) => header !== "" && !claimedIndexes.has(index));
+
+  const rows: ParsedImportRow[] = [];
+  const invalidRows: InvalidImportRow[] = [];
+
+  sheetRows
     .map((row, index) => ({ row, sheetRow: index + 1 }))
     .filter(({ row }) => row.some((value) => value.trim() !== ""))
-    .map(({ row, sheetRow }) => {
+    .forEach(({ row, sheetRow }) => {
       const name = cell(row, "firstName");
       const company = cell(row, "company");
       const email = cell(row, "email");
       const phone = cell(row, "phone");
       const validEmail = isValidEmail(email) ? email : "";
       const validPhone = isValidPhone(phone) ? phone : "";
-      return {
+      // Lead Name is never left empty for an importable row: name, else
+      // company, else email, else the phone number itself.
+      const fullName = name || company || validEmail || validPhone;
+
+      if (!fullName) {
+        // Every cell that could become a name/company/phone/email was
+        // empty or a placeholder ("N/A", "-", etc.) -- the raw row had
+        // *some* non-empty cell (that's how it got this far), but nothing
+        // usable. Ignored silently, per explicit instruction -- still
+        // tracked internally so counts stay accurate.
+        invalidRows.push({ sheetRow });
+        return;
+      }
+
+      const notesFromSheet = cell(row, "notes");
+      const shortened = shortenAtWordBoundary(fullName, MAX_FIRST_NAME_LENGTH);
+      const wasShortened = shortened !== fullName;
+      const notes = wasShortened
+        ? [notesFromSheet, `Full name from sheet: ${fullName}`].filter(Boolean).join(" | ")
+        : notesFromSheet;
+
+      const extraFields: Record<string, string> = {};
+      for (const { header, index } of extraHeaderIndexes) {
+        const value = meaningfulText(row[index] ?? "");
+        if (value !== "") extraFields[header] = value;
+      }
+
+      rows.push({
         sheetRow,
-        // Lead Name is never left empty for an importable row: name, else
-        // company, else email, else the phone number itself.
-        firstName: name || company || validEmail || validPhone,
+        firstName: shortened,
+        fullName,
+        wasShortened,
         lastName: "",
         company,
         email,
@@ -2402,16 +2461,12 @@ function buildImportRows(
         estimatedValue: parseEstimatedValue(cell(row, "estimatedValue")),
         listingRating: parseListingRating(cell(row, "listingRating")),
         rating: parseTemperature(cell(row, "temperature")),
-        notes: cell(row, "notes"),
-      };
-    })
-    .filter((row) => {
-      // Importable if it has at least one of: a name, a valid phone, a
-      // valid email, a company -- which is exactly what firstName's own
-      // fallback chain above already requires: it's only empty when name,
-      // company, a valid email and a valid phone are ALL missing.
-      return Boolean(row.firstName);
+        notes,
+        extraFields,
+      });
     });
+
+  return { rows, invalidRows };
 }
 
 function PreviewCount({
@@ -2439,23 +2494,6 @@ function PreviewCount({
   );
 }
 
-function describeImportFailureReason(reason: string): string {
-  switch (reason) {
-    case "duplicate":
-      return "Already exists as another lead -- skipped, not modified";
-    case "ambiguous":
-      return "Matched more than one existing lead -- needs manual review";
-    case "not_authorized":
-      return "Matched a lead you do not own or manage";
-    case "invalid":
-      return "No name, company, phone or email found in this row";
-    case "failed":
-      return "Save failed";
-    default:
-      return reason || "Could not process this row";
-  }
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -2472,20 +2510,17 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
   const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
   const [sheetRows, setSheetRows] = useState<string[][]>([]);
   const [dataRowCount, setDataRowCount] = useState(0);
-  // null means "use the auto-detected column"; a number is a manual column
-  // index override; a field absent from this map is still auto-detected.
-  // Explicitly set to a sentinel of -1 to mean "skip this column entirely".
-  const [mappingOverride, setMappingOverride] = useState<Partial<Record<ImportField, number>>>({});
-  const [showMapping, setShowMapping] = useState(false);
   const [lastResult, setLastResult] = useState<{
     newCount: number;
     duplicateCount: number;
     ambiguousCount: number;
     invalidCount: number;
     failedCount: number;
+    shortenedCount: number;
     replacedCount: number;
     restoredCount: number;
     failedRows: Array<{ row: number; firstName: string; reason: string; error?: string }>;
+    shortenedRows: Array<{ row: number; firstName: string }>;
   } | null>(null);
 
   function reset() {
@@ -2495,8 +2530,6 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
     setSheetHeaders([]);
     setSheetRows([]);
     setDataRowCount(0);
-    setMappingOverride({});
-    setShowMapping(false);
     setLastResult(null);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -2504,8 +2537,6 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
   async function handleFile(file: File) {
     setFileError(null);
     setLastResult(null);
-    setMappingOverride({});
-    setShowMapping(false);
     const isSupported = /\.(csv|xlsx|xls)$/i.test(file.name);
     if (!isSupported) {
       setFileError("Unsupported file type. Upload a .CSV, .XLSX, or .XLS file.");
@@ -2527,36 +2558,23 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
     }
   }
 
-  const autoMapping = useMemo(() => mapImportColumns(sheetHeaders, sheetRows), [sheetHeaders, sheetRows]);
-  // -1 is this component's own "explicitly skipped" sentinel -- translated
-  // to a real `null` (never read as a column) only at the edge, here.
-  const effectiveMapping = useMemo(() => {
-    const result: Partial<Record<ImportField, number | null>> = { ...autoMapping };
-    for (const [field, index] of Object.entries(mappingOverride) as Array<[ImportField, number]>) {
-      result[field] = index === -1 ? null : index;
-    }
-    return result;
-  }, [autoMapping, mappingOverride]);
-  const parsedRows = useMemo(
-    () => buildImportRows(sheetHeaders, sheetRows, effectiveMapping),
-    [sheetHeaders, sheetRows, effectiveMapping],
+  const { rows: parsedRows, invalidRows } = useMemo(
+    () => buildImportRows(sheetHeaders, sheetRows),
+    [sheetHeaders, sheetRows],
   );
 
-  // A name over the database's limit is never silently truncated -- it's
-  // excluded from what gets sent and reported separately, so the user can
-  // see exactly which rows need fixing before retrying.
-  const tooLongRows = useMemo(
-    () => parsedRows.filter((row) => row.firstName.length > MAX_FIRST_NAME_LENGTH),
-    [parsedRows],
-  );
-  const importRows = useMemo(
-    () => parsedRows.filter((row) => row.firstName.length <= MAX_FIRST_NAME_LENGTH),
-    [parsedRows],
-  );
+  // A name over the database's limit is never excluded -- it's shortened to
+  // the limit at a word boundary and the full original name is kept in
+  // notes, so it still imports. Listed here only as a warning, never
+  // removed from importRows.
+  const importRows = parsedRows;
 
-  // dataRowCount > 0 but parsedRows is empty means every row was read but
-  // none had a name, valid phone, valid email or company -- distinct from
-  // a sheet that has headers but no data rows at all.
+  // Every raw row the file reader found non-empty is now accounted for in
+  // exactly one bucket: imported (parsedRows, including shortened names)
+  // or invalid (invalidRows, a non-empty row with nothing usable in any
+  // mapped field) -- parsedRows.length + invalidRows.length must always
+  // equal dataRowCount, so the header's "N rows detected" always matches
+  // what the rest of the dialog reports.
   const noDataRows = fileName !== "" && dataRowCount === 0;
   const noImportableRows = fileName !== "" && dataRowCount > 0 && parsedRows.length === 0;
   const missingColumnMessage = noImportableRows
@@ -2586,6 +2604,9 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
         result.restoredCount > 0
           ? `${result.restoredCount} manually added lead${result.restoredCount === 1 ? "" : "s"} kept`
           : "",
+        result.shortenedCount > 0
+          ? `${result.shortenedCount} name${result.shortenedCount === 1 ? "" : "s"} shortened`
+          : "",
         result.duplicateCount > 0 ? `${result.duplicateCount} duplicate` : "",
         result.ambiguousCount > 0 ? `${result.ambiguousCount} ambiguous` : "",
         result.invalidCount > 0 ? `${result.invalidCount} invalid` : "",
@@ -2605,7 +2626,16 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
   });
 
   const rowCount = importRows.length;
-  const canImport = rowCount > 0 && !importMutation.isPending;
+  // The existing-leads check must finish successfully before Import is
+  // enabled -- importing while it's still running (or after it failed)
+  // would commit without knowing which rows are actually duplicates or
+  // ambiguous matches.
+  const canImport =
+    rowCount > 0 &&
+    !importMutation.isPending &&
+    !preview.isFetching &&
+    !preview.isError &&
+    preview.data != null;
 
   return (
     <Dialog
@@ -2617,12 +2647,12 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
         }
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col overflow-hidden sm:max-w-lg">
         <DialogHeader>
-          <div className="flex items-center gap-2">
-            <FileSpreadsheet className="size-5 text-primary" />
-            <DialogTitle>Import prospects from a file</DialogTitle>
-            <span className="inline-flex items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary ring-1 ring-inset ring-primary/20">
+          <div className="flex flex-wrap items-center gap-2">
+            <FileSpreadsheet className="size-5 shrink-0 text-primary" />
+            <DialogTitle className="min-w-0">Import prospects from a file</DialogTitle>
+            <span className="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary ring-1 ring-inset ring-primary/20">
               Batch Import
             </span>
           </div>
@@ -2632,7 +2662,7 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="min-w-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden pr-1">
           <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Select spreadsheet source
           </Label>
@@ -2666,9 +2696,9 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
               </p>
             </button>
           ) : (
-            <div className="rounded-lg border p-3">
+            <div className="w-full min-w-0 overflow-hidden rounded-lg border p-3">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className="flex min-w-0 items-center gap-2">
                   <FileSpreadsheet className="size-5 shrink-0 text-primary" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{fileName}</p>
@@ -2678,33 +2708,13 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
                     </p>
                   </div>
                 </div>
-                {tooLongRows.length > 0 ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/12 px-2.5 py-0.5 text-xs font-semibold text-warning ring-1 ring-inset ring-warning/20">
-                    {tooLongRows.length} need{tooLongRows.length === 1 ? "s" : ""} attention
-                  </span>
-                ) : (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-0.5 text-xs font-semibold text-success ring-1 ring-inset ring-success/20">
-                    <CheckCircle2 className="size-3.5" /> Validated
-                  </span>
-                )}
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/12 px-2.5 py-0.5 text-xs font-semibold text-success ring-1 ring-inset ring-success/20">
+                  <CheckCircle2 className="size-3.5" /> Ready
+                </span>
               </div>
-              <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className={cn(
-                    "h-full rounded-full",
-                    tooLongRows.length > 0 ? "bg-warning" : "bg-success",
-                  )}
-                  style={{
-                    width: `${dataRowCount === 0 ? 100 : Math.round((importRows.length / dataRowCount) * 100)}%`,
-                  }}
-                />
-              </div>
-              <div className="mt-1.5 flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground">
+              <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                <p className="min-w-0 text-xs text-muted-foreground">
                   {importRows.length} row{importRows.length === 1 ? "" : "s"} ready to import
-                  {tooLongRows.length > 0
-                    ? ` · ${tooLongRows.length} row${tooLongRows.length === 1 ? "" : "s"} over the ${MAX_FIRST_NAME_LENGTH}-character name limit, excluded`
-                    : ""}
                 </p>
                 <div className="flex shrink-0 items-center gap-2">
                   <button
@@ -2723,65 +2733,6 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
                   </button>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowMapping((v) => !v)}
-                className="mt-2 text-xs font-medium text-primary hover:underline"
-              >
-                {showMapping ? "Hide column mapping" : "Review column mapping"}
-              </button>
-              {showMapping ? (
-                <div className="mt-2 space-y-1.5 rounded-md border border-input bg-muted/20 p-2">
-                  <p className="text-xs text-muted-foreground">
-                    Detected columns below. Change any field to a different sheet column, or set it
-                    to "Not in this sheet" to skip it.
-                  </p>
-                  {(Object.keys(IMPORT_FIELD_LABELS) as ImportField[]).map((field) => {
-                    const current = effectiveMapping[field];
-                    return (
-                      <div key={field} className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium">{IMPORT_FIELD_LABELS[field]}</span>
-                        <select
-                          className={cn(selectClass, "h-7 w-44 text-xs")}
-                          value={current == null ? "-1" : String(current)}
-                          onChange={(e) =>
-                            setMappingOverride((prev) => ({
-                              ...prev,
-                              [field]: Number(e.target.value),
-                            }))
-                          }
-                        >
-                          <option value="-1">Not in this sheet</option>
-                          {sheetHeaders.map((header, index) => (
-                            <option key={index} value={index}>
-                              {header || `Column ${index + 1}`}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : null}
-              {tooLongRows.length > 0 ? (
-                <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-warning/30 bg-warning/5 p-2">
-                  <p className="mb-1 text-xs font-semibold text-warning">
-                    Rows excluded -- name longer than {MAX_FIRST_NAME_LENGTH} characters:
-                  </p>
-                  <ul className="space-y-0.5">
-                    {tooLongRows.slice(0, 20).map((row) => (
-                      <li key={row.sheetRow} className="truncate text-xs text-muted-foreground">
-                        Row {row.sheetRow}: {row.firstName.slice(0, 60)}…
-                      </li>
-                    ))}
-                    {tooLongRows.length > 20 ? (
-                      <li className="text-xs text-muted-foreground">
-                        …and {tooLongRows.length - 20} more
-                      </li>
-                    ) : null}
-                  </ul>
-                </div>
-              ) : null}
               {preview.data ? (
                 <>
                   <div className="mt-3 grid grid-cols-3 gap-1.5 text-xs">
@@ -2797,33 +2748,30 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
                     </p>
                   ) : null}
                 </>
-              ) : preview.isLoading ? (
+              ) : preview.isFetching ? (
                 <p className="mt-3 text-xs text-muted-foreground">Checking against existing leads…</p>
-              ) : null}
-              {preview.data && (preview.data.ambiguousCount > 0 || preview.data.invalidCount > 0) ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Rows matching more than one existing lead are never guessed -- they are skipped
-                  and reported after import so you can review them, fix the sheet, and retry just
-                  those rows. A row matching a lead that will survive this import (someone else's
-                  lead, a manually added lead, or a different past import) is skipped as a
-                  duplicate, never modified.
-                </p>
-              ) : null}
-              {lastResult && lastResult.failedRows.length > 0 ? (
-                <div className="mt-3 max-h-32 overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 p-2">
-                  <p className="mb-1 text-xs font-semibold text-destructive">
-                    {lastResult.failedRows.length} row{lastResult.failedRows.length === 1 ? "" : "s"}{" "}
-                    not imported or updated:
+              ) : preview.isError ? (
+                <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-2">
+                  <p className="text-xs text-destructive">
+                    Could not check against existing leads: {errorText(preview.error)}
                   </p>
-                  <ul className="space-y-0.5">
-                    {lastResult.failedRows.slice(0, 20).map((row) => (
-                      <li key={row.row} className="truncate text-xs text-muted-foreground">
-                        Row {row.row} ({row.firstName}): {describeImportFailureReason(row.reason)}
-                        {row.error ? ` -- ${row.error}` : ""}
-                      </li>
-                    ))}
-                  </ul>
+                  <button
+                    type="button"
+                    onClick={() => void preview.refetch()}
+                    className="shrink-0 text-xs font-medium text-primary hover:underline"
+                  >
+                    Retry
+                  </button>
                 </div>
+              ) : null}
+              {lastResult && lastResult.failedRows.some((row) => row.reason === "failed") ? (
+                <p className="mt-3 text-xs text-destructive">
+                  {lastResult.failedRows.filter((row) => row.reason === "failed").length} row
+                  {lastResult.failedRows.filter((row) => row.reason === "failed").length === 1
+                    ? ""
+                    : "s"}{" "}
+                  could not be saved. Nothing else was affected -- try the import again.
+                </p>
               ) : null}
             </div>
           )}
@@ -2845,17 +2793,19 @@ export function LeadImportDialog({ open, onClose }: { open: boolean; onClose: ()
           ) : null}
         </div>
 
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
-          <p className="text-sm text-muted-foreground">
+        <DialogFooter className="flex shrink-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="min-w-0 text-sm text-muted-foreground">
             {rowCount > 0
-              ? preview.data && preview.data.replaceCount > 0
-                ? `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"} and replace ${preview.data.replaceCount} lead${preview.data.replaceCount === 1 ? "" : "s"} from your last import`
-                : `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"}`
+              ? preview.isFetching
+                ? "Checking existing leads before import is enabled…"
+                : preview.data && preview.data.replaceCount > 0
+                  ? `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"} and replace ${preview.data.replaceCount} lead${preview.data.replaceCount === 1 ? "" : "s"} from your last import`
+                  : `Ready to import ${rowCount} row${rowCount === 1 ? "" : "s"}`
               : fileName
                 ? "This file cannot be imported"
                 : "No file selected"}
           </p>
-          <div className="flex gap-2">
+          <div className="flex shrink-0 gap-2">
             <Button
               type="button"
               variant="outline"

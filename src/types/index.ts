@@ -120,6 +120,10 @@ export interface LeaveRequest {
   from: string;
   to: string;
   days: number;
+  /** Portion of `days` that exceeded the remaining balance at submission
+   * time and was never deducted from the ledger. 0 for an ordinary
+   * request. Always <= days. */
+  excessDays: number;
   reason: string;
   status: RequestStatus;
   appliedOn: string;

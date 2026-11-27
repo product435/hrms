@@ -85,6 +85,10 @@ function one(value: unknown): LooseRow | null {
   return value && typeof value === "object" ? (value as LooseRow) : null;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 function personName(value: unknown): string {
   const row = one(value);
   if (!row) return "";
@@ -168,7 +172,13 @@ function mapLead(row: LooseRow): CrmLead {
     demoNotes: text(row["demo_notes"]),
     nextFollowUpAt: textOrNull(row["next_follow_up_at"]),
     importBatchId: textOrNull(row["import_batch_id"]),
+    activeBatchId: textOrNull(row["active_batch_id"]),
     importSequence: num(row["import_sequence"]),
+    importExtraFields: isPlainRecord(row["import_extra_fields"])
+      ? Object.fromEntries(
+          Object.entries(row["import_extra_fields"]).map(([key, value]) => [key, String(value ?? "")]),
+        )
+      : {},
   };
 }
 
@@ -283,6 +293,29 @@ async function rows(query: PromiseLike<QueryResult>): Promise<LooseRow[]> {
   return Array.isArray(data) ? (data as LooseRow[]) : [];
 }
 
+const PAGE_SIZE = 1000;
+const MAX_PAGES = 50;
+
+/** PostgREST caps an unpaginated query's result at its own configured
+ * max-rows (1000 by default) -- a query that never calls .range() is
+ * silently truncated past that point, with no error. This fetches every
+ * page until a short page confirms there's nothing left, matching the
+ * same pattern already used in orgOverviewService.ts. `build` must apply
+ * the SAME filters/order every call; only the range changes. */
+async function allRows(
+  build: (from: number, to: number) => PromiseLike<QueryResult>,
+): Promise<LooseRow[]> {
+  const out: LooseRow[] = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const { data, error } = await build(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    fail(error);
+    const page_rows = Array.isArray(data) ? (data as LooseRow[]) : [];
+    out.push(...page_rows);
+    if (page_rows.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
 async function runSave(table: string, id: string | null, payload: LooseRow): Promise<QueryResult> {
   const query = id
     ? db().from(table).update(payload).eq("id", id).select("id")
@@ -301,32 +334,6 @@ async function save(table: string, id: string | null, payload: LooseRow) {
   const { data, error } = await runSave(table, id, payload);
   fail(error);
   checkSaveResult(id, data);
-}
-
-/**
- * Runs one save() per lead (not a single multi-row update), so the
- * existing per-row RLS check in checkSaveResult still applies to each lead
- * individually -- a lead outside the caller's own/managed scope fails for
- * that row specifically instead of silently succeeding or blocking the
- * whole batch. Settled in parallel; failures are reported back by lead id
- * so the caller can tell the user exactly which rows did not update and why.
- */
-async function bulkSaveLeads(
-  ids: string[],
-  payload: LooseRow,
-): Promise<{ succeeded: string[]; failed: Array<{ id: string; error: string }> }> {
-  const results = await Promise.allSettled(ids.map((id) => save("crm_leads", id, payload)));
-  const failed: Array<{ id: string; error: string }> = [];
-  const succeeded: string[] = [];
-  ids.forEach((id, i) => {
-    const result = results[i];
-    if (result?.status === "fulfilled") {
-      succeeded.push(id);
-    } else if (result?.status === "rejected") {
-      failed.push({ id, error: result.reason instanceof Error ? result.reason.message : "Failed." });
-    }
-  });
-  return { succeeded, failed };
 }
 
 /**
@@ -448,24 +455,27 @@ export const crmService = {
    * lead above every imported lead, no matter which is newer -- manual
    * leads are never pushed down by an import. created_at descending then
    * ranks manual leads newest-first among themselves (a fresh "+ New
-   * lead" lands at the very top). import_crm_leads always deletes the
-   * entire previous import batch before inserting a new one, so only one
-   * batch's rows exist at a time in normal use; within that one batch,
-   * created_at is too close for Postgres to order reliably, so
-   * import_sequence (ascending, set once at import time in sheet order)
-   * is what actually keeps it in sheet order. id is a final stable
-   * tiebreak.
+   * lead" lands at the very top). import_sequence (ascending, set once at
+   * import time in sheet order) keeps a single import's own rows in
+   * sheet order. id is a final stable tiebreak.
+   *
+   * Paginated with allRows() rather than a single query: an org can hold
+   * more leads than PostgREST's own max-rows cap (1000 by default) --
+   * without paging, any org past that count would silently see only a
+   * truncated first page with no error, which is exactly what produced
+   * the "N of 1000" symptom this fixes.
    */
   async leads(): Promise<CrmLead[]> {
     if (!isSupabaseConfigured || !supabase) return [];
     return (
-      await rows(
+      await allRows((from, to) =>
         db()
           .from("crm_leads")
           .select(`*, ${OWNER("crm_leads")}`)
           .order("import_sequence", { ascending: true, nullsFirst: true })
           .order("created_at", { ascending: false })
-          .order("id", { ascending: false }),
+          .order("id", { ascending: false })
+          .range(from, to),
       )
     ).map(mapLead);
   },
@@ -512,18 +522,6 @@ export const crmService = {
   },
   async setLeadStatus(id: string, status: LeadStatus) {
     await save("crm_leads", id, { status });
-  },
-  async bulkSetLeadOwner(ids: string[], ownerId: string) {
-    return bulkSaveLeads(ids, { owner_id: ownerId });
-  },
-  async bulkSetLeadRating(ids: string[], rating: LeadRating) {
-    return bulkSaveLeads(ids, { rating });
-  },
-  async bulkSetLeadStatus(ids: string[], status: LeadStatus) {
-    return bulkSaveLeads(ids, { status });
-  },
-  async bulkSetLeadFollowUp(ids: string[], nextFollowUpAt: string) {
-    return bulkSaveLeads(ids, { next_follow_up_at: nextFollowUpAt });
   },
   /**
    * Demo tracking only exists once migration 20261112130740 is applied.
@@ -673,6 +671,9 @@ export const crmService = {
       listingRating?: number | null;
       rating?: "hot" | "warm" | "cold" | null;
       notes?: string;
+      /** Every column from the file that doesn't map to a known field,
+       * keyed by its original header text exactly as uploaded. */
+      extraFields?: Record<string, string>;
     }>,
   ): Promise<{
     newCount: number;
@@ -680,9 +681,11 @@ export const crmService = {
     ambiguousCount: number;
     invalidCount: number;
     failedCount: number;
+    shortenedCount: number;
     replacedCount: number;
     restoredCount: number;
     failedRows: Array<{ row: number; firstName: string; reason: string; error?: string }>;
+    shortenedRows: Array<{ row: number; firstName: string }>;
   }> {
     const { data, error } = await db().rpc("import_crm_leads", {
       p_file_name: fileName,
@@ -697,24 +700,35 @@ export const crmService = {
         listing_rating: row.listingRating ?? null,
         rating: row.rating ?? null,
         notes: row.notes ?? null,
+        extra_fields: row.extraFields ?? {},
       })),
     });
     fail(error);
     const result = (data ?? {}) as LooseRow;
     const errors = Array.isArray(result["errors"]) ? (result["errors"] as LooseRow[]) : [];
+    // "shortened" rows DID import successfully -- the server reports them
+    // in the same errors array for a single source of truth on row
+    // numbers, but they must never show up as a failure in the UI.
+    const shortened = errors.filter((e) => e["reason"] === "shortened");
+    const trueFailures = errors.filter((e) => e["reason"] !== "shortened");
     return {
       newCount: num(result["new_count"]) ?? 0,
       duplicateCount: num(result["duplicate_count"]) ?? 0,
       ambiguousCount: num(result["ambiguous_count"]) ?? 0,
       invalidCount: num(result["invalid_count"]) ?? 0,
       failedCount: num(result["failed_count"]) ?? 0,
+      shortenedCount: num(result["shortened_count"]) ?? shortened.length,
       replacedCount: num(result["replaced_count"]) ?? 0,
       restoredCount: num(result["restored_count"]) ?? 0,
-      failedRows: errors.map((e) => ({
+      failedRows: trueFailures.map((e) => ({
         row: num(e["row"]) ?? 0,
         firstName: String(e["first_name"] ?? ""),
         reason: String(e["reason"] ?? ""),
         ...(e["error"] ? { error: String(e["error"]) } : {}),
+      })),
+      shortenedRows: shortened.map((e) => ({
+        row: num(e["row"]) ?? 0,
+        firstName: String(e["first_name"] ?? ""),
       })),
     };
   },

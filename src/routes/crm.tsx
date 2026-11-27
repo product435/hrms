@@ -79,23 +79,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requireAuthForPath } from "@/lib/auth-guard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { compactInr, indiaDateKey, indianDateTime, inr, shortDate } from "@/lib/format";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { crmService } from "@/services/crmService";
 import {
@@ -1947,7 +1930,6 @@ function LeadsTab({
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(ALL);
   const [rating, setRating] = useState(ALL);
-  const [temperature, setTemperature] = useState(ALL);
   // A rep with no team/org-wide access never gets the Owner filter shown
   // (see the FilterBar below) and the row filter below must agree with
   // that even though the owner dropdown is hidden -- otherwise hiding the
@@ -1956,14 +1938,40 @@ function LeadsTab({
   const [owner, setOwner] = useState(showTeam ? ALL : MINE);
   const [whatsappLead, setWhatsappLead] = useState<CrmLead | null>(null);
   const [callLead, setCallLead] = useState<CrmLead | null>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkAction, setBulkAction] = useState<
-    "owner" | "rating" | "status" | "follow-up" | null
-  >(null);
-  const [bulkValue, setBulkValue] = useState("");
-  const [bulkPending, setBulkPending] = useState(false);
   const needle = search.trim().toLowerCase();
-  const rows = leads.filter((lead) => {
+
+  // Display filter only -- nothing is deleted or archived. Every lead's
+  // active_batch_id (set and kept up to date server-side by
+  // import_crm_leads() and a crm_leads insert trigger -- see
+  // 20261127110000_crm_leads_active_batch.sql) says which sheet it is
+  // currently grouped with, for both imported and hand-added leads. A
+  // lead is shown if its active_batch_id matches its owner's latest
+  // batch, or if it has no active_batch_id at all (that owner has never
+  // imported, so nothing is hidden). Scoped per owner, not per viewer, so
+  // a team/admin view shows everyone's own most recent import at once.
+  const latestBatchByOwner = useMemo(() => {
+    const latest = new Map<string, { batchId: string; importedAt: number }>();
+    for (const lead of leads) {
+      if (!lead.importBatchId) continue;
+      const importedAt = new Date(lead.createdAt).getTime();
+      const current = latest.get(lead.ownerId);
+      if (!current || importedAt > current.importedAt) {
+        latest.set(lead.ownerId, { batchId: lead.importBatchId, importedAt });
+      }
+    }
+    return latest;
+  }, [leads]);
+  const visibleLeads = useMemo(
+    () =>
+      leads.filter((lead) => {
+        const latest = latestBatchByOwner.get(lead.ownerId);
+        if (!latest) return true;
+        return lead.activeBatchId === latest.batchId;
+      }),
+    [leads, latestBatchByOwner],
+  );
+
+  const rows = visibleLeads.filter((lead) => {
     if (status === "open" && ["converted", "unqualified"].includes(lead.status)) return false;
     if (status !== "open" && status !== ALL && lead.status !== status) return false;
     if (
@@ -1971,7 +1979,6 @@ function LeadsTab({
       !matchesListingRatingRange(lead.listingRating, rating as ListingRatingRange)
     )
       return false;
-    if (temperature !== ALL && lead.rating !== temperature) return false;
     if (!matchesOwner(lead.ownerId, showTeam ? owner : MINE, me)) return false;
     if (!needle) return true;
     return [lead.firstName, lead.lastName, lead.company, lead.email, lead.phone].some((value) =>
@@ -1981,116 +1988,18 @@ function LeadsTab({
 
   // Overdue follow-up: scheduled in the past and still not converted/unqualified.
   const now = Date.now();
-  const overdueCount = leads.filter(
+  const overdueCount = visibleLeads.filter(
     (lead) =>
       lead.nextFollowUpAt != null &&
       new Date(lead.nextFollowUpAt).getTime() < now &&
       lead.status !== "converted" &&
       lead.status !== "unqualified",
   ).length;
-  const temperatureCounts = {
-    hot: leads.filter((lead) => lead.rating === "hot").length,
-    warm: leads.filter((lead) => lead.rating === "warm").length,
-    cold: leads.filter((lead) => lead.rating === "cold").length,
-  };
-
-  // Only rows the caller is actually allowed to edit can be bulk-selected --
-  // selecting a row never implies permission beyond what the row action
-  // buttons already allow; the service layer's per-row RLS check is still
-  // the real enforcement either way.
-  const selectableRows = rows.filter((row) => canEdit(row.ownerId));
-  const selectedRows = selectableRows.filter((row) => selectedIds.has(row.id));
-  const allSelectableSelected =
-    selectableRows.length > 0 && selectedRows.length === selectableRows.length;
-
-  function toggleRow(id: string) {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleAll() {
-    setSelectedIds(allSelectableSelected ? new Set() : new Set(selectableRows.map((r) => r.id)));
-  }
-
-  function closeBulk() {
-    setBulkAction(null);
-    setBulkValue("");
-  }
-
-  async function runBulkAction() {
-    if (!bulkAction || selectedRows.length === 0) return;
-    const ids = selectedRows.map((r) => r.id);
-    setBulkPending(true);
-    try {
-      let result: { succeeded: string[]; failed: Array<{ id: string; error: string }> };
-      if (bulkAction === "owner") {
-        if (!bulkValue) {
-          toast.error("Choose an owner.");
-          return;
-        }
-        result = await crmService.bulkSetLeadOwner(ids, bulkValue);
-      } else if (bulkAction === "rating") {
-        result = await crmService.bulkSetLeadRating(ids, bulkValue as CrmLead["rating"]);
-      } else if (bulkAction === "status") {
-        result = await crmService.bulkSetLeadStatus(ids, bulkValue as CrmLead["status"]);
-      } else {
-        if (!bulkValue) {
-          toast.error("Choose a follow-up date.");
-          return;
-        }
-        result = await crmService.bulkSetLeadFollowUp(ids, new Date(bulkValue).toISOString());
-      }
-      if (result.succeeded.length > 0) {
-        toast.success(
-          `Updated ${result.succeeded.length} lead${result.succeeded.length === 1 ? "" : "s"}` +
-            (result.failed.length > 0 ? `, ${result.failed.length} failed` : ""),
-        );
-      }
-      if (result.failed.length > 0 && result.succeeded.length === 0) {
-        toast.error(result.failed[0]?.error ?? "Could not update the selected leads.");
-      }
-      setSelectedIds((current) => {
-        const next = new Set(current);
-        result.succeeded.forEach((id) => next.delete(id));
-        return next;
-      });
-      void queryClient.invalidateQueries({ queryKey: CRM_QUERY_KEY });
-      closeBulk();
-    } catch (error) {
-      toast.error(errorText(error));
-    } finally {
-      setBulkPending(false);
-    }
-  }
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const contactById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
 
   const columns: Column<CrmLead>[] = [
-    {
-      key: "select",
-      header: (
-        <Checkbox
-          checked={allSelectableSelected}
-          onCheckedChange={toggleAll}
-          aria-label="Select all"
-          disabled={selectableRows.length === 0}
-        />
-      ),
-      cell: (row) =>
-        canEdit(row.ownerId) ? (
-          <Checkbox
-            checked={selectedIds.has(row.id)}
-            onCheckedChange={() => toggleRow(row.id)}
-            onClick={(e) => e.stopPropagation()}
-            aria-label={`Select ${personName(row.firstName, row.lastName)}`}
-          />
-        ) : null,
-    },
     {
       key: "name",
       header: "Lead",
@@ -2291,28 +2200,6 @@ function LeadsTab({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {(
-          [
-            { value: ALL, label: `All (${leads.length})` },
-            { value: "hot", label: `🔥 Hot (${temperatureCounts.hot})` },
-            { value: "warm", label: `🌤 Warm (${temperatureCounts.warm})` },
-            { value: "cold", label: `❄️ Cold (${temperatureCounts.cold})` },
-          ] as const
-        ).map((chip) => (
-          <button
-            key={chip.value}
-            type="button"
-            onClick={() => setTemperature(chip.value)}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-              temperature === chip.value
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-input text-muted-foreground hover:bg-muted/40",
-            )}
-          >
-            {chip.label}
-          </button>
-        ))}
         {overdueCount > 0 ? (
           <button
             type="button"
@@ -2354,7 +2241,7 @@ function LeadsTab({
                   label: "Owner",
                   value: owner,
                   onChange: setOwner,
-                  options: ownerFilterOptions(leads),
+                  options: ownerFilterOptions(visibleLeads),
                 },
               ]
             : []),
@@ -2365,30 +2252,6 @@ function LeadsTab({
           </Button>
         }
       />
-      {selectedRows.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-          <span className="text-sm font-medium">
-            {selectedRows.length} selected
-          </span>
-          <Button size="sm" variant="outline" onClick={() => setBulkAction("status")}>
-            Set status
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setBulkAction("rating")}>
-            Set temperature
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setBulkAction("follow-up")}>
-            Schedule follow-up
-          </Button>
-          {canManageAll ? (
-            <Button size="sm" variant="outline" onClick={() => setBulkAction("owner")}>
-              Reassign owner
-            </Button>
-          ) : null}
-          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
-            Clear selection
-          </Button>
-        </div>
-      ) : null}
       <DataTable
         columns={columns}
         data={rows}
@@ -2403,78 +2266,6 @@ function LeadsTab({
         emptyTitle="No leads here"
         emptyDescription="New enquiries, referrals and event contacts land here first."
       />
-      <Dialog open={bulkAction != null} onOpenChange={(next) => !next && closeBulk()}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>
-              {bulkAction === "owner"
-                ? "Reassign owner"
-                : bulkAction === "rating"
-                  ? "Set temperature"
-                  : bulkAction === "status"
-                    ? "Set status"
-                    : "Schedule follow-up"}
-            </DialogTitle>
-            <DialogDescription>
-              Applies to {selectedRows.length} selected lead{selectedRows.length === 1 ? "" : "s"}.
-            </DialogDescription>
-          </DialogHeader>
-          {bulkAction === "owner" ? (
-            <Select value={bulkValue} onValueChange={setBulkValue}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose an owner" />
-              </SelectTrigger>
-              <SelectContent>
-                {owners.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : bulkAction === "rating" ? (
-            <Select value={bulkValue} onValueChange={setBulkValue}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a temperature" />
-              </SelectTrigger>
-              <SelectContent>
-                {LEAD_RATINGS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {crmLabel(value)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : bulkAction === "status" ? (
-            <Select value={bulkValue} onValueChange={setBulkValue}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a status" />
-              </SelectTrigger>
-              <SelectContent>
-                {LEAD_STATUSES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {crmLabel(value)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              type="datetime-local"
-              value={bulkValue}
-              onChange={(e) => setBulkValue(e.target.value)}
-            />
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={closeBulk} disabled={bulkPending}>
-              Cancel
-            </Button>
-            <Button onClick={() => void runBulkAction()} disabled={bulkPending || !bulkValue}>
-              {bulkPending ? "Applying…" : "Apply"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
       <WhatsAppDialog
         open={whatsappLead != null}
         leadId={whatsappLead?.id ?? null}

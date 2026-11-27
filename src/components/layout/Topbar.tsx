@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { StatusBadge } from "@/components/common/StatusBadge";
+import { formatBadgeCount } from "@/lib/utils";
 import { ROLE_LABELS, useSession } from "@/hooks/useSession";
 import { useTheme } from "@/hooks/useTheme";
 import { indianDateTime } from "@/lib/format";
@@ -138,8 +139,8 @@ export function Topbar({ onOpenSidebar }: { onOpenSidebar: () => void }) {
             >
               <Bell className="size-5" />
               {unread > 0 ? (
-                <span className="absolute right-2 top-2 grid size-4 place-items-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-                  {unread}
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground">
+                  {formatBadgeCount(unread)}
                 </span>
               ) : null}
             </Button>
