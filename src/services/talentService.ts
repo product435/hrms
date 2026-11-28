@@ -375,6 +375,31 @@ export const talentService = {
     if (error) throw toActionableSupabaseError(error);
   },
   /**
+   * Employee's own goal: set status directly, including Completed. Calls
+   * submit_own_goal_status (20261128130000_goal_self_status_and_delete.sql),
+   * which enforces "own goal only" and blocks once already completed,
+   * same style as submitGoalProgress/updateOwnGoal above.
+   */
+  async submitOwnGoalStatus(goalId: string, status: Goal["status"]) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await untypedDb().rpc("submit_own_goal_status", {
+      p_goal_id: goalId,
+      p_status: status,
+    });
+    if (error) throw toActionableSupabaseError(error);
+  },
+  /**
+   * Admin/HR (or an authorized manager) action: permanently remove a
+   * goal. Calls delete_goal (20261128130000_goal_self_status_and_delete.sql),
+   * which checks authorization itself and re-confirms at the moment of
+   * deletion that nothing references goals before removing the row.
+   */
+  async deleteGoal(goalId: string) {
+    if (!isSupabaseConfigured || !supabase) throw new Error("Supabase is not configured.");
+    const { error } = await untypedDb().rpc("delete_goal", { p_goal_id: goalId });
+    if (error) throw toActionableSupabaseError(error);
+  },
+  /**
    * Reviewer (manager/dept head/admin/hr) action: approve/override a
    * goal's status with a required reason, verify completion (which also
    * sets progress to 100 so the two can never disagree), or apply a

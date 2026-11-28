@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, Target } from "lucide-react";
+import { Pencil, Plus, Target, Trash2 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { PageHeader } from "@/components/common/PageHeader";
 import { StatCard } from "@/components/common/StatCard";
@@ -27,10 +27,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
+
+const GOAL_STATUS_OPTIONS: Array<{ value: Goal["status"]; label: string }> = [
+  { value: "on-track", label: "On track" },
+  { value: "at-risk", label: "At risk" },
+  { value: "delayed", label: "Delayed" },
+  { value: "completed", label: "Completed" },
+];
 
 export const Route = createFileRoute("/goals")({
   beforeLoad: () => requireAuthForPath("/goals"),
@@ -204,6 +226,37 @@ function GoalsPage() {
       }),
   });
 
+  // Employee's own status change, including Completed -- separate from
+  // submitProgress (progress/remarks only) and from reviewGoal (which
+  // stays the only path for a manager/admin/HR to change someone else's
+  // goal's status).
+  const submitStatus = useMutation({
+    mutationFn: (vars: { goalId: string; status: Goal["status"] }) =>
+      talentService.submitOwnGoalStatus(vars.goalId, vars.status),
+    onSuccess: () => {
+      toast.success("Status updated");
+      void queryClient.invalidateQueries({ queryKey: ["goals"] });
+    },
+    onError: (e) =>
+      toast.error("Could not update status", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
+  const [deleteDialog, setDeleteDialog] = useState<{ goalId: string; title: string } | null>(null);
+  const deleteGoalMutation = useMutation({
+    mutationFn: (goalId: string) => talentService.deleteGoal(goalId),
+    onSuccess: () => {
+      toast.success("Goal deleted");
+      setDeleteDialog(null);
+      void queryClient.invalidateQueries({ queryKey: ["goals"] });
+    },
+    onError: (e) =>
+      toast.error("Could not delete goal", {
+        description: e instanceof Error ? e.message : "Supabase request failed.",
+      }),
+  });
+
   const data = goals.data ?? [];
   const atRisk = data.filter(
     (goal) => goal.status === "at-risk" || goal.status === "delayed" || isOverdue(goal, today),
@@ -338,9 +391,57 @@ function GoalsPage() {
         header: "Status",
         cell: (row) => {
           const { label, tone } = displayStatus(row, today);
+          const openReview = () => {
+            setReviewDialog({ goalId: row.id, title: row.title });
+            setReviewStatus(row.status);
+            setReviewReason("");
+            setReviewDescription(row.description ?? "");
+            setReviewTarget(row.target ?? "");
+            setReviewDueDate(row.dueDate ?? "");
+            setReviewProgress("");
+          };
+          const canEditOwnStatus = canEditGoal(row) && row.status !== "completed";
+          const canReviewRow = canReview(row);
           return (
             <div className="space-y-1">
-              <StatusBadge status={label} {...(tone ? { tone } : {})} />
+              <div className="flex items-center gap-1">
+                <StatusBadge status={label} {...(tone ? { tone } : {})} />
+                {canEditOwnStatus ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-6"
+                        aria-label="Change status"
+                      >
+                        <Pencil className="size-3.5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      {GOAL_STATUS_OPTIONS.map((option) => (
+                        <DropdownMenuItem
+                          key={option.value}
+                          disabled={option.value === row.status || submitStatus.isPending}
+                          onClick={() => submitStatus.mutate({ goalId: row.id, status: option.value })}
+                        >
+                          {option.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
+                {/* Admin/HR/reviewer pencil opens the SAME review_goal()-backed
+                    Review dialog, pre-filled -- a required reason still
+                    applies, same as the Review button; no separate
+                    no-reason status bypass. */}
+                {canReviewRow ? (
+                  <IconAction label="Change status" variant="ghost" className="size-6" onClick={openReview}>
+                    <Pencil className="size-3.5" />
+                  </IconAction>
+                ) : null}
+              </div>
               {row.managerReviewReason ? (
                 <p
                   className="max-w-40 truncate text-xs text-muted-foreground"
@@ -349,23 +450,22 @@ function GoalsPage() {
                   Reviewer: {row.managerReviewReason}
                 </p>
               ) : null}
-              {canReview(row) ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-6 px-1.5 text-xs"
-                  onClick={() => {
-                    setReviewDialog({ goalId: row.id, title: row.title });
-                    setReviewStatus(row.status);
-                    setReviewReason("");
-                    setReviewDescription(row.description ?? "");
-                    setReviewTarget(row.target ?? "");
-                    setReviewDueDate(row.dueDate ?? "");
-                    setReviewProgress("");
-                  }}
-                >
-                  Review
-                </Button>
+              {canReviewRow ? (
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="ghost" className="h-6 px-1.5 text-xs" onClick={openReview}>
+                    Review
+                  </Button>
+                  {canManageAny ? (
+                    <IconAction
+                      label="Delete goal"
+                      variant="ghost"
+                      className="size-6"
+                      onClick={() => setDeleteDialog({ goalId: row.id, title: row.title })}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </IconAction>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           );
@@ -376,6 +476,7 @@ function GoalsPage() {
     progressDrafts,
     remarksDrafts,
     submitProgress,
+    submitStatus,
     canManageAny,
     isLead,
     isSelfService,
@@ -617,6 +718,30 @@ function GoalsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={deleteDialog !== null}
+        onOpenChange={(open) => !open && !deleteGoalMutation.isPending && setDeleteDialog(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{deleteDialog?.title}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the goal. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteGoalMutation.isPending}>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={deleteGoalMutation.isPending}
+              onClick={() => deleteDialog && deleteGoalMutation.mutate(deleteDialog.goalId)}
+            >
+              {deleteGoalMutation.isPending ? "Deleting…" : "Delete"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }
